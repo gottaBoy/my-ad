@@ -201,18 +201,16 @@ compose.sim-x86.yaml
   - awsim
   - ground-truth
   - scenario-metadata
-  - recorder-source（可选）
-  - zenoh-bridge-x86（跨 ROS 版本时）
 
 compose.dgx.yaml
   - autoware
-  - recorder-dgx（可选）
+  - recorder（record profile）
   - replay
-  - foxglove-bridge
-  - dataset-converter
-  - bevformer-train
-  - tensorrt-build
-  - zenoh-bridge-dgx（跨 ROS 版本时）
+  - foxglove-bridge（viz profile）
+  - scenario-simulator（scenario profile）
+  - isaac-sim（isaac profile）
+  - dataset-converter（data profile）
+  - tensorrt-build（deploy profile）
 ```
 
 DGX 单机回归另设 profile 或覆盖文件：
@@ -220,12 +218,16 @@ DGX 单机回归另设 profile 或覆盖文件：
 ```text
 compose.dgx.yaml --profile scenario
 compose.dgx.yaml --profile isaac
-compose.dgx.yaml --profile train
-compose.dgx.yaml --profile ops
+compose.dgx.yaml --profile data
+compose.dgx.yaml --profile deploy
 ```
 
 Compose 负责生命周期、依赖和持久化，不假设一条 `docker compose up`
 就能绕过跨主机网络、显示系统、NGC 登录或外部资产下载等前置条件。
+
+跨 ROS 发行版或需要显式路由隔离时，Zenoh Bridge 不作为当前 Compose
+内置服务，而是由已验证的 bridge 镜像或单独覆盖文件接入。这样不会把尚未
+锁定的 bridge 镜像、配置和消息白名单误标为可直接运行。
 
 ### 3.6 Harness 运行原则
 
@@ -1187,34 +1189,65 @@ AWSIM ARM64 源码构建不属于第一版行动项。Isaac Sim 6.0.1 在上述�
 - Isaac Lab 安装说明：
   <https://isaac-sim.github.io/IsaacLab/develop/source/setup/installation/index.html>
 
-## 18. 实现文件规划
+## 18. 实现文件与当前状态
 
-本文档当前只交付方案。后续实现阶段将在 `my-ad` 中增加：
+方案已经在 `my-ad` 中落成 Compose 工程骨架。当前已增加：
 
 ```text
 compose.sim-x86.yaml
 compose.dgx.yaml
 .env.example
 images/
-  autoware/
-  recorder/
   dataset-converter/
-  bevformer/
-  tensorrt/
-  isaac-autoware-adapter/
 config/
   cyclone/
   zenoh/
   autoware/
-  sensors/
 scripts/
   preflight/
   harness/
   collect/
   replay/
+  ops/
 artifacts/
 docs/
 ```
+
+当前 Compose 已提供的可执行服务包括：
+
+| Compose 文件 | 服务或 profile | 作用 |
+|---|---|---|
+| `compose.sim-x86.yaml` | `awsim` | x86_64 RTX 主机上的 AWSIM 入口 |
+| `compose.sim-x86.yaml` | `collect` | ground truth 入口和场景元数据 |
+| `compose.dgx.yaml` | `autoware` | DGX Spark ARM64 Autoware 入口 |
+| `compose.dgx.yaml` | `record` | ROS 2 bag 录制 |
+| `compose.dgx.yaml` | `replay` | ROS 2 bag 回放 |
+| `compose.dgx.yaml` | `viz` | Foxglove Bridge |
+| `compose.dgx.yaml` | `scenario` | DGX 单机 Scenario Simulator |
+| `compose.dgx.yaml` | `isaac` | Isaac Sim 长期替代路线 |
+| `compose.dgx.yaml` | `data` | 中间数据 manifest 转换器 |
+| `compose.dgx.yaml` | `deploy` | TensorRT 构建/部署入口 |
+
+这些服务均通过 `.env` 注入镜像和启动命令。AWSIM、Autoware、Scenario
+Simulator、Isaac Sim、Foxglove 和 TensorRT 的具体镜像仍必须在目标机器上
+锁定 tag、digest 和实际启动命令后，才能进入运行态验证。
+
+当前实现已完成：
+
+- 双主机 Compose 文件静态校验。
+- DGX 和 x86 主机的角色、网络、GPU、持久化目录定义。
+- ROS 2、CycloneDDS、Zenoh、录包、回放和 profile 边界。
+- 宿主机预检、Compose 配置展开和基础 Harness。
+- 场景元数据写入和数据 manifest 转换器。
+- Dockerfile、环境变量模板、Makefile 和运行手册。
+
+当前仍需在目标机器补齐或验证：
+
+- 真实 AWSIM x86_64 镜像、启动参数和 ground truth 消息适配器。
+- 真实 ARM64 Autoware 镜像、地图、车辆模型和 sensor kit 启动命令。
+- Scenario Simulator、Isaac Sim、Foxglove 和 TensorRT 的锁定镜像。
+- 完整 nuScenes 转换、BEVFormer 训练、ONNX/TensorRT 和 RL 实现。
+- 双主机网络、DDS/Zenoh、传感器频率、真值对齐和闭环指标。
 
 实现文件必须遵循：
 
@@ -1222,6 +1255,7 @@ docs/
 - 所有源码二开通过 bind mount 或独立 Dockerfile 管理。
 - 数据、模型、日志和 Harness 证据全部落在宿主机持久化目录。
 - 主机特定路径和地址只写入 `.env`，不硬编码到 Compose。
-- 每个服务都提供 healthcheck、资源限制、日志策略和 profile。
+- 核心服务提供 healthcheck；GPU、网络、存储和日志策略按目标机器的实际
+  资源配置补齐，不把未验证的限制值伪装成生产基线。
 - 每一阶段实现后运行对应 Harness，结果只允许
   `PASS/FAIL/BLOCKED/NOT-RUN`。

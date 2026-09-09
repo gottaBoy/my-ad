@@ -1,0 +1,121 @@
+name: ${COMPOSE_PROJECT_NAME:-my-ad-dgx}
+
+x-dgx-gpu: &dgx-gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+x-dgx-common: &dgx-common
+  <<: *dgx-gpu
+  platform: linux/arm64
+  init: true
+  ipc: host
+  shm_size: "8gb"
+  network_mode: ${DGX_NETWORK_MODE:-host}
+  environment:
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:?ROS_DOMAIN_ID is required}
+    ROS_DISTRO: ${ROS_DISTRO:-humble}
+    RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
+    CYCLONEDDS_URI: ${CYCLONEDDS_URI:-/config/cyclone/cyclonedds.xml}
+    NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+    NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-all}
+    DISPLAY: ${DISPLAY:-}
+    AUTOWARE_COMMAND: ${AUTOWARE_COMMAND:-}
+    SCENARIO_COMMAND: ${SCENARIO_COMMAND:-}
+    ISAAC_COMMAND: ${ISAAC_COMMAND:-}
+    FOXGLOVE_COMMAND: ${FOXGLOVE_COMMAND:-}
+    TOPIC_FILE: ${TOPIC_FILE:-/config/record/topics.txt}
+    BAG_OUTPUT_DIR: ${BAG_OUTPUT_DIR:-/data/bags}
+    BAG_NAME: ${BAG_NAME:-run_manual}
+    BAG_STORAGE: ${BAG_STORAGE:-mcap}
+    REPLAY_BAG: ${REPLAY_BAG:-}
+    SCENARIO_ID: ${SCENARIO_ID:-manual}
+    MAP_VERSION: ${MAP_VERSION:-unset}
+    VEHICLE_MODEL: ${VEHICLE_MODEL:-unset}
+    SENSOR_MODEL: ${SENSOR_MODEL:-unset}
+    RANDOM_SEED: ${RANDOM_SEED:-unset}
+  volumes:
+    - ${MAPS_DIR:-./data/maps}:/data/maps:ro
+    - ${BAGS_DIR:-./data/bags}:/data/bags
+    - ${GROUND_TRUTH_DIR:-./data/ground_truth}:/data/ground_truth
+    - ${DATASETS_DIR:-./data/datasets}:/data/datasets
+    - ${MODELS_DIR:-./data/models}:/data/models
+    - ${ENGINES_DIR:-./data/engines}:/data/engines
+    - ${LOGS_DIR:-./data/logs}:/data/logs
+    - ${REPORTS_DIR:-./data/reports}:/data/reports
+    - ${CACHE_DIR:-./data/cache}:/data/cache
+    - ./config:/config:ro
+    - ./scripts:/opt/my-ad/scripts:ro
+  restart: "no"
+
+services:
+  autoware:
+    <<: *dgx-common
+    image: ${AUTOWARE_IMAGE:?AUTOWARE_IMAGE must be set in .env}
+    container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-autoware
+    command: ["/opt/my-ad/scripts/ops/start-autoware.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/autoware.ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  recorder:
+    <<: *dgx-common
+    image: ${ROS_BASE_IMAGE:-ros:humble-ros-base}
+    container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-recorder
+    profiles: ["record"]
+    depends_on:
+      autoware:
+        condition: service_started
+    command: ["/opt/my-ad/scripts/collect/record.sh"]
+
+  replay:
+    <<: *dgx-common
+    image: ${ROS_BASE_IMAGE:-ros:humble-ros-base}
+    container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-replay
+    profiles: ["replay"]
+    command: ["/opt/my-ad/scripts/replay/replay.sh"]
+
+  foxglove-bridge:
+    <<: *dgx-common
+    image: ${FOXGLOVE_IMAGE:?FOXGLOVE_IMAGE must be set in .env}
+    container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-foxglove
+    profiles: ["viz"]
+    command: ["/opt/my-ad/scripts/ops/start-foxglove.sh"]
+
+  scenario-simulator:
+    <<: *dgx-common
+    image: ${SCENARIO_IMAGE:?SCENARIO_IMAGE must be set in .env}
+    container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-scenario
+    profiles: ["scenario"]
+    command: ["/opt/my-ad/scripts/ops/start-scenario.sh"]
+
+  isaac-sim:
+    <<: *dgx-common
+    image: ${ISAAC_IMAGE:?ISAAC_IMAGE must be set in .env}
+    container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-isaac
+    profiles: ["isaac"]
+    command: ["/opt/my-ad/scripts/ops/start-isaac.sh"]
+
+  dataset-converter:
+    <<: *dgx-common
+    build:
+      context: .
+      dockerfile: images/dataset-converter/Dockerfile
+    image: my-ad/dataset-converter:dev
+    container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-dataset-converter
+    profiles: ["data"]
+    command: ["python", "/opt/my-ad/converter/convert.py", "--input", "/data/bags", "--output", "/data/datasets"]
+
+  tensorrt-build:
+    <<: *dgx-common
+    image: ${TENSORRT_IMAGE:?TENSORRT_IMAGE must be set in .env}
+    container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-tensorrt
+    profiles: ["deploy"]
+    command: ["sleep", "infinity"]

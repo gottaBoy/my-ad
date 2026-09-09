@@ -1,0 +1,13 @@
+/clock
+/tf
+/tf_static
+/sensing/camera/camera0/image_raw
+/sensing/camera/camera0/camera_info
+/sensing/lidar/top/pointcloud_raw
+/vehicle/status/velocity_status
+/vehicle/status/steering_status
+/vehicle/status/control_mode
+/localization/kinematic_state
+/perception/object_recognition/objects
+/planning/trajectory
+/control/command/control_cmd

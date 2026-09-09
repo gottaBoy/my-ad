@@ -1,0 +1,70 @@
+name: ${COMPOSE_PROJECT_NAME:-my-ad-sim}
+
+x-sim-gpu: &sim-gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+x-sim-common: &sim-common
+  <<: *sim-gpu
+  platform: linux/amd64
+  init: true
+  ipc: host
+  network_mode: ${SIM_NETWORK_MODE:-host}
+  environment:
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:?ROS_DOMAIN_ID is required}
+    ROS_DISTRO: ${ROS_DISTRO:-humble}
+    RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION_SIM:-rmw_cyclonedds_cpp}
+    CYCLONEDDS_URI: ${CYCLONEDDS_URI:-/config/cyclone/cyclonedds.xml}
+    NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+    NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-all}
+    DISPLAY: ${DISPLAY:-}
+    AWSIM_COMMAND: ${AWSIM_COMMAND:-}
+    GROUND_TRUTH_COMMAND: ${GROUND_TRUTH_COMMAND:-}
+    SCENARIO_ID: ${SCENARIO_ID:-manual}
+    MAP_VERSION: ${MAP_VERSION:-unset}
+    VEHICLE_MODEL: ${VEHICLE_MODEL:-unset}
+    SENSOR_MODEL: ${SENSOR_MODEL:-unset}
+    RANDOM_SEED: ${RANDOM_SEED:-unset}
+  volumes:
+    - ${MAPS_DIR:-./data/maps}:/data/maps:ro
+    - ${GROUND_TRUTH_DIR:-./data/ground_truth}:/data/ground_truth
+    - ${BAGS_DIR:-./data/bags}:/data/bags
+    - ${LOGS_DIR:-./data/logs}:/data/logs
+    - ./config:/config:ro
+    - ./scripts/ops:/opt/my-ad/scripts:ro
+  restart: "no"
+
+services:
+  awsim:
+    <<: *sim-common
+    image: ${AWSIM_IMAGE:?AWSIM_IMAGE must be set in .env}
+    container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-awsim
+    command: ["/opt/my-ad/scripts/start-awsim.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/awsim.ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  ground-truth:
+    <<: *sim-common
+    image: ${GROUND_TRUTH_IMAGE:?GROUND_TRUTH_IMAGE must be set in .env}
+    container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-ground-truth
+    profiles: ["collect"]
+    depends_on:
+      awsim:
+        condition: service_started
+    command: ["/opt/my-ad/scripts/start-ground-truth.sh"]
+
+  scenario-metadata:
+    <<: *sim-common
+    image: ${ROS_BASE_IMAGE:-ros:humble-ros-base}
+    container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-scenario-metadata
+    profiles: ["collect"]
+    command: ["/opt/my-ad/scripts/write-scenario-metadata.sh"]
