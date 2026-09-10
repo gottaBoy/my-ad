@@ -79,16 +79,36 @@ section() { printf '\n========== %s ==========\n' "$1"; }
   # --- NVIDIA Container Toolkit ---
   section 'NVIDIA Container Toolkit'
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    if docker info 2>/dev/null | grep -qi 'Runtimes.*nvidia'; then
+    if command -v nvidia-ctk >/dev/null 2>&1; then
+      printf 'nvidia-ctk:      %s\n' "$(nvidia-ctk --version 2>/dev/null || echo 'installed, version unavailable')"
+      printf 'CDI devices:\n'
+      nvidia-ctk cdi list 2>/dev/null || echo 'nvidia-ctk could not list CDI devices'
+    else
+      echo 'nvidia-ctk:      NOT found'
+    fi
+
+    docker_runtimes="$(docker info --format '{{json .Runtimes}}' 2>/dev/null || echo '{}')"
+    printf 'Docker runtimes: %s\n' "${docker_runtimes}"
+    if [[ "${docker_runtimes}" == *'"nvidia"'* ]]; then
       echo 'nvidia runtime:  available'
+      gpu_runtime_args=(--runtime=nvidia --gpus all)
     else
       echo 'nvidia runtime:  NOT found in Docker runtimes'
+      gpu_runtime_args=(--gpus all)
     fi
-    if docker run --rm --gpus all "nvidia/cuda:12-base-$(uname -m)" nvidia-smi -L >/dev/null 2>&1; then
+
+    gpu_probe_image="${GPU_CONTAINER_PROBE_IMAGE:-ubuntu:24.04}"
+    gpu_probe_log="$(mktemp)"
+    printf 'GPU probe image: %s\n' "${gpu_probe_image}"
+    if docker run --rm "${gpu_runtime_args[@]}" "${gpu_probe_image}" nvidia-smi -L \
+      >"${gpu_probe_log}" 2>&1; then
       echo 'GPU in container: accessible'
     else
-      echo 'GPU in container: NOT accessible (may need NVIDIA Container Toolkit)'
+      echo 'GPU in container: NOT accessible'
+      echo 'GPU probe error:'
+      tail -n 5 "${gpu_probe_log}" | sed 's/^/  /'
     fi
+    rm -f "${gpu_probe_log}"
   else
     echo 'Docker daemon not reachable, skip container GPU check'
   fi
