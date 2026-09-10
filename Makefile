@@ -6,7 +6,7 @@ SIM_COMPOSE := docker compose --env-file $(ENV_FILE) -f compose.sim-x86.yaml
 
 .PHONY: init preflight config build-tools build-tools-sim build-navsim up-dgx up-sim collect-sim down-dgx down-sim \
 	record record-sim replay viz scenario isaac navsim navsim-cache data deploy test-compose test-local \
-	harness-host harness-gpu harness-network harness-clock harness-runtime harness-ros harness-navsim
+	harness-host harness-gpu harness-network harness-clock harness-runtime harness-ros harness-navsim collect-env
 
 init:
 	mkdir -p data/maps data/bags data/ground_truth data/datasets data/models data/engines data/logs data/reports data/cache \
@@ -17,6 +17,9 @@ init:
 
 preflight:
 	ENV_FILE="$(ENV_FILE)" ./scripts/preflight/check.sh
+
+collect-env:
+	./scripts/preflight/collect-env.sh
 
 config:
 	ENV_FILE="$(ENV_FILE)" ./scripts/harness/compose-config.sh

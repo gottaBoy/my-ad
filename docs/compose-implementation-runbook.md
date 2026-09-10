@@ -176,6 +176,17 @@ make init
 
 检查目标机：
 
+如果需要收集主机信息用于配置 `.env`，先运行：
+
+```bash
+make collect-env
+```
+
+报告输出到终端和 `artifacts/env-report/`，包含架构、OS、Docker、GPU、
+容器 GPU 访问、内存、磁盘、网络接口和 `.env` 占位符计数。
+
+确认以下关键项：
+
 ```bash
 uname -m
 docker info --format '{{.Architecture}}'

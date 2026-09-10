@@ -69,6 +69,8 @@ make init
 
 - x86_64 主机设置 `HOST_ROLE=sim-x86`。
 - DGX Spark 设置 `HOST_ROLE=dgx`。
+- 模板默认 `PREFLIGHT_SCOPE=host`，先完成宿主机检查；核心镜像、启动命令、
+  健康探针、GPU smoke 镜像和地图就绪后再切换为 `core`。
 - 首先替换当前主机核心路径需要的 `REPLACE_` 镜像、启动命令和健康探针。
 - 启用可选 profile 前，再替换该 profile 对应的配置。
 - 固定正式镜像的 tag 和 digest。
@@ -93,6 +95,16 @@ AUTOWARE_IMAGE=<registry>/<image>:<tag>@sha256:<digest>
 ```
 
 ## Gate 0：静态和宿主机预检
+
+如果需要收集 DGX Spark 主机信息（架构、GPU、Docker、磁盘、网络）用于
+配置 `.env`，先运行：
+
+```bash
+make collect-env
+```
+
+报告同时输出到终端和 `artifacts/env-report/`。把报告内容发回给开发者，
+可以快速确认哪些镜像和命令需要配置。
 
 ```bash
 make test-local
