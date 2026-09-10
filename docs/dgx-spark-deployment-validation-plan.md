@@ -8,11 +8,12 @@ Compose 为统一编排方式，逐步验证：
 ```text
 仿真 -> Autoware -> 传感器数据采集 -> 真值标注 -> 数据回放
      -> 模型训练 -> TensorRT 部署 -> 闭环评估
+官方 OpenScene/nuPlan -> NAVSIM Agent -> 离线规划评测 -> 模型迭代
 ```
 
 本文档只描述部署方法、实施步骤和验收标准，不包含具体的 Compose 实现。
 
-文档基线日期：2026-09-09。
+文档基线日期：2026-09-10。
 
 ## 2. 已确认结论
 
@@ -83,7 +84,25 @@ Docker Compose。它可以作为长期单机高保真替代，但需要单独实
 
 因此，Isaac Sim 是长期适配项目，不是 AWSIM 的无成本直接替换。
 
-### 2.5 结论状态
+### 2.5 NAVSIM 离线规划评测
+
+NAVSIM 在本方案中是独立的离线规划评测和模型迭代路线。它使用官方
+OpenScene/nuPlan 数据、地图和 sensor blobs，对 Agent 输出的未来轨迹进行
+PDM/EPDMS 类指标评测，并不提供 AWSIM 的实时渲染、ROS 2 控制闭环或
+ground truth 采集能力。
+
+实施边界：
+
+- DGX Spark 上通过 `compose.dgx.yaml` 的 `navsim` profile 运行。
+- 优先使用已验证的 ARM64 镜像；没有官方可直接假设的 DGX Spark 镜像。
+- 可通过固定 NAVSIM git ref 的 Dockerfile 进行源码构建，但官方旧版
+  PyTorch、GIS 和 Python 依赖必须在 DGX Spark 单独验证。
+- 官方数据先以 `mini` 完成最小基线，再扩展到 `navtrain`、
+  `navhard_two_stage` 或其他锁定 split。
+- AWSIM ROS 2 bag 到 NAVSIM OpenScene schema、以及 NAVSIM 轨迹到 Autoware
+  ROS 2 trajectory 都需要独立 adapter，不能直接连线。
+
+### 2.6 结论状态
 
 本文不把“官方文档支持”直接等同于“DGX Spark 已验证”。所有结论使用以下状态：
 
@@ -105,6 +124,9 @@ Docker Compose。它可以作为长期单机高保真替代，但需要单独实
 | AWSIM ARM64 可运行 | `blocked` | 不进入实施队列，不作为备用方案 |
 | Scenario Simulator 可在 DGX Spark 运行 | `source` | 进入单机 `local` 验证 |
 | Isaac Sim 6.0.1 可在 DGX Spark 运行 | `source` | 进入长期替代路线 `local` 验证 |
+| NAVSIM 可用于 DGX Spark 离线规划评测 | `source` | 进入 ARM64 镜像、数据和最小评测 `local` 验证 |
+| NAVSIM 可直接读取 AWSIM ROS 2 bag | `blocked` | 先实现 OpenScene/NAVSIM schema 适配器 |
+| NAVSIM 可替代 AWSIM 实时闭环 | `blocked` | NAVSIM 只作为离线/伪闭环规划评测路线 |
 | AWSIM Humble 与 Autoware Jazzy 可通信 | `source` | 必须经过 Zenoh `integration` 验证 |
 | GPU 容器可用 | 待测 | 作为所有后续测试的前置门槛 |
 | bag 可录制并回放 | 待测 | 作为数据采集阶段的闭环门槛 |
@@ -177,7 +199,36 @@ DGX Spark ARM64
 该路径以独立里程碑推进。只有 Autoware Adapter 的消息、TF、`/clock`、
 控制闭环和真值导出全部通过 Harness 后，才能替代主路径中的 AWSIM。
 
-### 3.4 不进入实施的实验路径
+### 3.4 NAVSIM 离线规划路线
+
+```text
+DGX Spark ARM64
+|
+|-- NAVSIM evaluation/training container
+|-- OpenScene/nuPlan dataset and maps
+|-- metric cache
+|-- Agent checkpoints
+`-- reproducible EPDMS/PDM reports
+```
+
+该路线用于：
+
+- 官方 NAVSIM baseline 的安装和数据读取验证。
+- 规划 Agent 的训练、推理和模型对比。
+- 固定 split、checkpoint、配置和随机种子的离线评测。
+- 为后续在线 planner adapter 提供候选轨迹和离线回归证据。
+
+该路线不承担：
+
+- AWSIM 传感器渲染或 ground truth 生成。
+- ROS 2 在线控制和 Autoware 生命周期。
+- 将 EPDMS/PDM Score 直接解释为 Autoware 闭环成功率。
+
+Compose 使用 `navsim` profile；`make harness-navsim` 只检查入口和数据契约，
+`make navsim-cache` 生成 metric cache，`make navsim` 执行一次评测 Job。
+三者均不代表 NAVSIM 已接入 Autoware。
+
+### 3.5 不进入实施的实验路径
 
 ```text
 DGX Spark ARM64 -> 从源码构建 AWSIM
@@ -192,7 +243,7 @@ DGX Spark ARM64 -> 从源码构建 AWSIM
 
 不使用 QEMU/x86 模拟运行 AWSIM 作为性能仿真方案。
 
-### 3.5 Compose 拆分
+### 3.6 Compose 拆分
 
 正式主路径由两份 Compose 独立部署：
 
@@ -201,16 +252,19 @@ compose.sim-x86.yaml
   - awsim
   - ground-truth
   - scenario-metadata
+  - recorder-source（record-source profile）
 
 compose.dgx.yaml
   - autoware
   - recorder（record profile）
   - replay
+  - ros-probe（harness profile）
   - foxglove-bridge（viz profile）
   - scenario-simulator（scenario profile）
   - isaac-sim（isaac profile）
   - dataset-converter（data profile）
   - tensorrt-build（deploy profile）
+  - navsim（navsim profile）
 ```
 
 DGX 单机回归另设 profile 或覆盖文件：
@@ -220,6 +274,7 @@ compose.dgx.yaml --profile scenario
 compose.dgx.yaml --profile isaac
 compose.dgx.yaml --profile data
 compose.dgx.yaml --profile deploy
+compose.dgx.yaml --profile navsim
 ```
 
 Compose 负责生命周期、依赖和持久化，不假设一条 `docker compose up`
@@ -229,7 +284,7 @@ Compose 负责生命周期、依赖和持久化，不假设一条 `docker compos
 内置服务，而是由已验证的 bridge 镜像或单独覆盖文件接入。这样不会把尚未
 锁定的 bridge 镜像、配置和消息白名单误标为可直接运行。
 
-### 3.6 Harness 运行原则
+### 3.7 Harness 运行原则
 
 每个阶段只验证有限数量的断言，不跨阶段掩盖失败。每条断言至少记录：
 
@@ -354,12 +409,15 @@ dgx/
 
 ### 5.1 `sim-x86`：AWSIM 仿真核心
 
-包含：
+当前 Compose 已包含：
 
 - AWSIM
 - Ground Truth Collector
 - Scenario Metadata Collector
 - Recorder Source
+
+后续按网络 Gate 接入：
+
 - Zenoh Bridge x86
 
 职责：
@@ -371,11 +429,15 @@ dgx/
 
 ### 5.2 `autoware-dgx`：算法核心
 
-包含：
+当前 Compose 已包含：
 
 - Autoware
 - Foxglove Bridge
 - Recorder DGX
+- ROS Probe
+
+跨发行版或需要显式路由隔离时再接入：
+
 - Zenoh Bridge DGX
 
 职责：
@@ -441,7 +503,62 @@ Recorder 的最终部署位置由网络基线测试决定，不在方案阶段�
 - 重复运行标准场景。
 - 生成可比较的指标报告。
 
-### 5.7 `train`：模型训练
+### 5.8 `navsim`：离线规划评测和模型迭代
+
+包含：
+
+- NAVSIM ARM64 evaluation/training 容器。
+- OpenScene/nuPlan 数据和 nuPlan 地图。
+- metric cache。
+- Agent 配置、checkpoint 和实验结果。
+- EPDMS/PDM 报告及重复运行对比。
+
+职责：
+
+- 在 DGX Spark 上先跑官方 `mini` baseline，确认依赖、数据和报告链路。
+- 再按需求运行 `navtrain`、`navtest`、`navhard_two_stage` 或锁定的内部 split。
+- 固定源码 ref、镜像 digest、数据版本、地图版本、Agent 配置和随机种子。
+- 将 NAVSIM 轨迹评测与 Autoware 在线闭环分开记账。
+
+NAVSIM 官方安装文档使用 Python 3.9、editable install、OpenScene sensor
+blobs 和 nuPlan maps。仓库中的 `images/navsim/Dockerfile` 只提供固定
+基础镜像和 git ref 的构建入口，不保证官方旧版 PyTorch、GIS 依赖和 CUDA
+扩展已经适配 ARM64/CUDA 13。
+
+运行顺序：
+
+```text
+Compose 展开
+  -> ARM64 image/import/data/maps Harness
+  -> metric cache
+  -> 官方 baseline evaluation
+  -> 固定配置重复运行
+  -> Agent 模型迭代
+```
+
+NAVSIM 不能直接读取本仓库 ROS 2 bag。若要使用 AWSIM 数据，必须先实现
+ROS bag/ground truth 到 OpenScene/NAVSIM schema 的适配器，至少覆盖场景
+ID、传感器历史、ego 状态、标定、坐标系、地图、轨迹和评测真值。
+
+若要把 NAVSIM Agent 接入 Autoware，必须再实现独立 trajectory adapter，
+验证消息字段、TF、时间戳、采样频率、碰撞检查和安全回退。NAVSIM 离线
+评测通过不等于 Autoware 在线闭环通过。
+
+#### 5.8.1 NAVSIM Harness 门槛
+
+| 编号 | 断言 | 通过标准 | 证据 |
+|---|---|---|---|
+| H-NAV-01 | Compose 和架构 | `navsim` profile 为 `linux/arm64` 且 GPU 可声明 | Compose 和镜像快照 |
+| H-NAV-02 | 镜像 provenance | tag、digest、源码 ref 可记录 | image/ref report |
+| H-NAV-03 | Python 依赖 | `import navsim`、nuPlan 和关键 GIS 依赖成功 | import report |
+| H-NAV-04 | 数据可读取 | maps、logs、sensor blobs 与选定 split 完整 | dataset report |
+| H-NAV-05 | metric cache | 固定数据生成缓存，重复生成无结构差异 | cache report |
+| H-NAV-06 | 最小 Agent 评测 | 官方 baseline 完成且生成报告 | evaluation report |
+| H-NAV-07 | 结果可重复 | 相同输入和配置的关键指标在阈值内一致 | comparison report |
+| H-NAV-08 | AWSIM 数据适配 | schema、时间戳、坐标系和真值抽样通过 | adapter report |
+| H-NAV-09 | Autoware adapter | 轨迹消息、TF、安全约束和在线回退通过 | integration report |
+
+### 5.9 `train`：模型训练
 
 包含：
 
@@ -452,7 +569,7 @@ Recorder 的最终部署位置由网络基线测试决定，不在方案阶段�
 
 训练容器与 Autoware 容器分离，代码、数据和 checkpoint 使用宿主机挂载。
 
-#### 5.7.1 BEVFormer 依赖策略
+#### 5.9.1 BEVFormer 依赖策略
 
 原始蓝图中的以下命令不能直接作为 DGX Spark 部署基线：
 
@@ -487,7 +604,7 @@ mmcv-full cu130/torch2.5 预编译 wheel
 batch size、数据加载 worker、梯度累积、混合精度、activation checkpoint、
 缓存上限和训练期间停止非必要容器为主。
 
-#### 5.7.2 BEVFormer Harness 门槛
+#### 5.9.2 BEVFormer Harness 门槛
 
 | 编号 | 断言 | 通过标准 | 证据 |
 |---|---|---|---|
@@ -498,7 +615,7 @@ batch size、数据加载 worker、梯度累积、混合精度、activation chec
 | H-DEP-05 | BEVFormer 最小 forward | 一个 batch 完成且无非法内存访问 | forward log |
 | H-DEP-06 | 资源峰值受控 | 峰值内存低于锁定阈值 | metrics report |
 
-### 5.8 `deploy`：模型部署
+### 5.10 `deploy`：模型部署
 
 包含：
 
@@ -509,7 +626,7 @@ batch size、数据加载 worker、梯度累积、混合精度、activation chec
 
 模型接入 Autoware 时，优先采用独立的 inference adapter，不直接修改 Autoware 核心模块。
 
-### 5.9 `rl`：强化学习
+### 5.11 `rl`：强化学习
 
 包含：
 
@@ -532,7 +649,7 @@ Isaac Lab 不能只按一个 `pip install isaaclab` 命令判断 DGX Spark 已�
 
 在感知、规划和数据 Gate 尚未通过时，不启动 RL 训练。
 
-### 5.10 `ops`：实验和监控
+### 5.12 `ops`：实验和监控
 
 包含：
 
@@ -914,16 +1031,21 @@ scenario-metadata
 
 ```text
 autoware
-foxglove-bridge
-scenario-simulator（单机基线 profile）
 ```
 
-Recorder 的位置在网络测试后选择：
+完成核心 Autoware `local` 验证后，按目标逐项启用：
 
 ```text
-recorder-source
-或
-recorder-dgx
+ros-probe（harness profile）
+foxglove-bridge（viz profile）
+scenario-simulator（scenario profile）
+```
+
+Recorder 的最终位置在网络测试后选择：
+
+```text
+recorder（DGX，当前已实现）
+或 recorder-source（x86，当前已实现）
 ```
 
 如果 AWSIM 与 Autoware ROS 版本不同，或需要显式路由隔离，再增加：
@@ -951,15 +1073,17 @@ jupyter
 ```text
 artifacts/
   <test-id>/
-    host-info/
-    image-info/
-    compose-config/
-    logs/
-    topic-snapshot/
-    bag-metadata/
-    metrics/
-    decision.md
+    <UTC时间>-<主机>/
+      host-info/
+      image-info/
+      compose-config/
+      logs/
+      metrics/
+      decision.md
 ```
+
+`topic-snapshot`、`bag-metadata` 等专项证据在对应集成 Harness 实现后加入，
+不能因为目录名称已经规划就视为测试已经存在。
 
 每个测试结果只能标记为：
 
@@ -995,6 +1119,11 @@ NOT-RUN
 
 AWSIM ARM64 不列入首轮测试矩阵，状态固定为 `BLOCKED`，直到第 3.4 节的
 重新评估条件全部具备。
+
+`scripts/harness/run.sh` 只接受 `host`、`gpu`、`network`、`clock`、
+`runtime`、`ros` 和 `compose` 等原子检查名。上表的 `T-*` 是聚合测试，
+必须汇总相关原子证据后人工或由后续 Gate 汇总器判定，不能把单个原子检查
+直接命名为 `T-*`。
 
 ### 10.3 测试参数锁定
 
@@ -1188,6 +1317,12 @@ AWSIM ARM64 源码构建不属于第一版行动项。Isaac Sim 6.0.1 在上述�
   <https://github.com/isaac-sim/IsaacLab/releases>
 - Isaac Lab 安装说明：
   <https://isaac-sim.github.io/IsaacLab/develop/source/setup/installation/index.html>
+- NAVSIM 官方仓库：
+  <https://github.com/autonomousvision/navsim>
+- NAVSIM 安装说明：
+  <https://github.com/autonomousvision/navsim/blob/main/docs/install.md>
+- NAVSIM cache、数据 split、Agent 和 metrics 说明：
+  <https://github.com/autonomousvision/navsim/tree/main/docs>
 
 ## 18. 实现文件与当前状态
 
@@ -1199,6 +1334,7 @@ compose.dgx.yaml
 .env.example
 images/
   dataset-converter/
+  navsim/
 config/
   cyclone/
   zenoh/
@@ -1209,7 +1345,9 @@ scripts/
   collect/
   replay/
   ops/
+  start-navsim.sh
 artifacts/
+third_party/
 docs/
 ```
 
@@ -1219,14 +1357,17 @@ docs/
 |---|---|---|
 | `compose.sim-x86.yaml` | `awsim` | x86_64 RTX 主机上的 AWSIM 入口 |
 | `compose.sim-x86.yaml` | `collect` | ground truth 入口和场景元数据 |
+| `compose.sim-x86.yaml` | `record-source` | 网络不足时在 AWSIM 源端录制 ROS 2 bag |
 | `compose.dgx.yaml` | `autoware` | DGX Spark ARM64 Autoware 入口 |
 | `compose.dgx.yaml` | `record` | ROS 2 bag 录制 |
 | `compose.dgx.yaml` | `replay` | ROS 2 bag 回放 |
+| `compose.dgx.yaml` | `harness` | ROS 2 必需话题发现探针 |
 | `compose.dgx.yaml` | `viz` | Foxglove Bridge |
 | `compose.dgx.yaml` | `scenario` | DGX 单机 Scenario Simulator |
 | `compose.dgx.yaml` | `isaac` | Isaac Sim 长期替代路线 |
 | `compose.dgx.yaml` | `data` | 中间数据 manifest 转换器 |
 | `compose.dgx.yaml` | `deploy` | TensorRT 构建/部署入口 |
+| `compose.dgx.yaml` | `navsim` | NAVSIM 离线规划评测/模型迭代 Job |
 
 这些服务均通过 `.env` 注入镜像和启动命令。AWSIM、Autoware、Scenario
 Simulator、Isaac Sim、Foxglove 和 TensorRT 的具体镜像仍必须在目标机器上
@@ -1239,6 +1380,7 @@ Simulator、Isaac Sim、Foxglove 和 TensorRT 的具体镜像仍必须在目标�
 - ROS 2、CycloneDDS、Zenoh、录包、回放和 profile 边界。
 - 宿主机预检、Compose 配置展开和基础 Harness。
 - 场景元数据写入和数据 manifest 转换器。
+- NAVSIM 的 ARM64 profile、源码构建入口、数据/地图挂载和专属 Harness。
 - Dockerfile、环境变量模板、Makefile 和运行手册。
 
 当前仍需在目标机器补齐或验证：
@@ -1246,7 +1388,10 @@ Simulator、Isaac Sim、Foxglove 和 TensorRT 的具体镜像仍必须在目标�
 - 真实 AWSIM x86_64 镜像、启动参数和 ground truth 消息适配器。
 - 真实 ARM64 Autoware 镜像、地图、车辆模型和 sensor kit 启动命令。
 - Scenario Simulator、Isaac Sim、Foxglove 和 TensorRT 的锁定镜像。
+- NAVSIM ARM64 镜像、Python/GIS 依赖、官方数据和最小 baseline 评测。
 - 完整 nuScenes 转换、BEVFormer 训练、ONNX/TensorRT 和 RL 实现。
+- AWSIM/ROS bag 到 NAVSIM OpenScene 的数据适配器，以及 NAVSIM trajectory
+  到 Autoware 的在线 planner adapter。
 - 双主机网络、DDS/Zenoh、传感器频率、真值对齐和闭环指标。
 
 实现文件必须遵循：

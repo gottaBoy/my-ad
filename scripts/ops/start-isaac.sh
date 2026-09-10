@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-if [[ "${ISAAC_COMMAND:-}" == "" ]]; then
+if [[ -z "${ISAAC_COMMAND:-}" || "${ISAAC_COMMAND}" == REPLACE_* ]]; then
   echo "ISAAC_COMMAND is not configured" >&2
   exit 78
 fi

@@ -1,0 +1,10 @@
+# Minimum distributed-loop discovery contract.
+# Replace sensor topic names after the actual AWSIM sensor kit is locked.
+/clock
+/tf
+/tf_static
+/sensing/camera/camera0/image_raw
+/sensing/lidar/top/pointcloud_raw
+/vehicle/status/velocity_status
+/planning/trajectory
+/control/command/control_cmd

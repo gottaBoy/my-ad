@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-if [[ "${GROUND_TRUTH_COMMAND:-}" == "" ]]; then
+if [[ -z "${GROUND_TRUTH_COMMAND:-}" || "${GROUND_TRUTH_COMMAND}" == REPLACE_* ]]; then
   echo "GROUND_TRUTH_COMMAND is not configured for this AWSIM message schema" >&2
   exit 78
 fi

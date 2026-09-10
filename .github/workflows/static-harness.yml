@@ -1,0 +1,25 @@
+name: static-harness
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show tool versions
+        run: |
+          docker compose version
+          python3 --version
+
+      - name: Run local tests
+        run: make test-local
+
+      - name: Expand every Compose profile
+        run: ENV_FILE=.env.example make test-compose
+
+      - name: Check patch whitespace
+        run: git diff --check

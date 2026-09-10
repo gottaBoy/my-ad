@@ -21,3 +21,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 .DS_Store
+
+third_party/*
+!third_party/.gitkeep

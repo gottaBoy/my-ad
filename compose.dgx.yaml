@@ -10,7 +10,6 @@ x-dgx-gpu: &dgx-gpu
             capabilities: [gpu]
 
 x-dgx-common: &dgx-common
-  <<: *dgx-gpu
   platform: linux/arm64
   init: true
   ipc: host
@@ -25,12 +24,16 @@ x-dgx-common: &dgx-common
     NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-all}
     DISPLAY: ${DISPLAY:-}
     AUTOWARE_COMMAND: ${AUTOWARE_COMMAND:-}
+    AUTOWARE_HEALTHCHECK_COMMAND: ${AUTOWARE_HEALTHCHECK_COMMAND:-}
     SCENARIO_COMMAND: ${SCENARIO_COMMAND:-}
+    SCENARIO_HEALTHCHECK_COMMAND: ${SCENARIO_HEALTHCHECK_COMMAND:-}
     ISAAC_COMMAND: ${ISAAC_COMMAND:-}
+    ISAAC_HEALTHCHECK_COMMAND: ${ISAAC_HEALTHCHECK_COMMAND:-}
     FOXGLOVE_COMMAND: ${FOXGLOVE_COMMAND:-}
+    FOXGLOVE_HEALTHCHECK_COMMAND: ${FOXGLOVE_HEALTHCHECK_COMMAND:-}
     TOPIC_FILE: ${TOPIC_FILE:-/config/record/topics.txt}
     BAG_OUTPUT_DIR: ${BAG_OUTPUT_DIR:-/data/bags}
-    BAG_NAME: ${BAG_NAME:-run_manual}
+    BAG_NAME: ${BAG_NAME:-}
     BAG_STORAGE: ${BAG_STORAGE:-mcap}
     REPLAY_BAG: ${REPLAY_BAG:-}
     SCENARIO_ID: ${SCENARIO_ID:-manual}
@@ -38,6 +41,7 @@ x-dgx-common: &dgx-common
     VEHICLE_MODEL: ${VEHICLE_MODEL:-unset}
     SENSOR_MODEL: ${SENSOR_MODEL:-unset}
     RANDOM_SEED: ${RANDOM_SEED:-unset}
+    DATASET_SOURCE_ID: ${DATASET_SOURCE_ID:-awsim}
   volumes:
     - ${MAPS_DIR:-./data/maps}:/data/maps:ro
     - ${BAGS_DIR:-./data/bags}:/data/bags
@@ -52,35 +56,110 @@ x-dgx-common: &dgx-common
     - ./scripts:/opt/my-ad/scripts:ro
   restart: "no"
 
+x-navsim-gpu: &navsim-gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+x-navsim-common: &navsim-common
+  platform: linux/arm64
+  init: true
+  shm_size: ${NAVSIM_SHM_SIZE:-16gb}
+  network_mode: ${NAVSIM_NETWORK_MODE:-none}
+  working_dir: ${NAVSIM_WORKDIR:-/workspace/navsim}
+  environment:
+    NAVSIM_IMAGE: ${NAVSIM_IMAGE:-}
+    NAVSIM_REPO_URL: ${NAVSIM_REPO_URL:-https://github.com/autonomousvision/navsim.git}
+    NAVSIM_GIT_REF: ${NAVSIM_GIT_REF:-}
+    NAVSIM_COMMAND: ${NAVSIM_COMMAND:-}
+    NAVSIM_HEALTHCHECK_COMMAND: ${NAVSIM_HEALTHCHECK_COMMAND:-}
+    NAVSIM_DEVKIT_ROOT: ${NAVSIM_DEVKIT_ROOT:-/workspace/navsim}
+    NAVSIM_EXP_ROOT: ${NAVSIM_EXP_ROOT:-/data/navsim/exp}
+    OPENSCENE_DATA_ROOT: ${OPENSCENE_DATA_ROOT:-/data/navsim/dataset}
+    NAVSIM_REPORT_ROOT: ${NAVSIM_REPORT_ROOT:-/data/reports/navsim}
+    NAVSIM_CACHE_ROOT: ${NAVSIM_CACHE_ROOT:-/data/cache/navsim}
+    NUPLAN_MAP_VERSION: ${NUPLAN_MAP_VERSION:-nuplan-maps-v1.0}
+    NUPLAN_MAPS_ROOT: ${NUPLAN_MAPS_ROOT:-/data/navsim/dataset/maps}
+    NAVSIM_SPLIT: ${NAVSIM_SPLIT:-navhard_two_stage}
+    NAVSIM_RUN_ID: ${NAVSIM_RUN_ID:-manual}
+    NAVSIM_NUM_WORKERS: ${NAVSIM_NUM_WORKERS:-4}
+    NAVSIM_BATCH_SIZE: ${NAVSIM_BATCH_SIZE:-1}
+    NAVSIM_SEED: ${NAVSIM_SEED:-0}
+    NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+    NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-all}
+    PYTHONUNBUFFERED: "1"
+    TORCH_HOME: ${NAVSIM_TORCH_CACHE:-/data/cache/navsim/torch}
+    HF_HOME: ${NAVSIM_HF_CACHE:-/data/cache/navsim/huggingface}
+  volumes:
+    - ${NAVSIM_SOURCE_DIR:-./third_party/navsim}:/workspace/navsim:ro
+    - ${NAVSIM_DATASET_DIR:-./data/navsim/dataset}:/data/navsim/dataset:ro
+    - ${NAVSIM_EXP_DIR:-./data/navsim/exp}:/data/navsim/exp
+    - ${NAVSIM_MODEL_DIR:-./data/models/navsim}:/data/models/navsim:ro
+    - ${NAVSIM_REPORT_DIR:-./data/reports/navsim}:/data/reports/navsim
+    - ${NAVSIM_CACHE_DIR:-./data/cache/navsim}:/data/cache/navsim
+    - ./scripts:/opt/my-ad/scripts:ro
+  restart: "no"
+
 services:
   autoware:
-    <<: *dgx-common
+    <<: [*dgx-common, *dgx-gpu]
     image: ${AUTOWARE_IMAGE:?AUTOWARE_IMAGE must be set in .env}
     container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-autoware
     command: ["/opt/my-ad/scripts/ops/start-autoware.sh"]
     healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/autoware.ready"]
+      test: ["CMD", "/opt/my-ad/scripts/ops/healthcheck-command.sh", "AUTOWARE_HEALTHCHECK_COMMAND"]
       interval: 5s
       timeout: 3s
       retries: 12
       start_period: 30s
+    stop_grace_period: 30s
 
   recorder:
     <<: *dgx-common
-    image: ${ROS_BASE_IMAGE:-ros:humble-ros-base}
+    image: ${ROS_TOOLS_IMAGE:-my-ad/ros-tools:humble}
+    build:
+      context: .
+      dockerfile: images/ros-tools/Dockerfile
+      args:
+        ROS_BASE_IMAGE: ${ROS_BASE_IMAGE:-ros:humble-ros-base}
+        ROS_DISTRO: ${ROS_DISTRO:-humble}
     container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-recorder
     profiles: ["record"]
     depends_on:
       autoware:
-        condition: service_started
+        condition: service_healthy
     command: ["/opt/my-ad/scripts/collect/record.sh"]
+    stop_grace_period: 60s
 
   replay:
     <<: *dgx-common
-    image: ${ROS_BASE_IMAGE:-ros:humble-ros-base}
+    image: ${ROS_TOOLS_IMAGE:-my-ad/ros-tools:humble}
+    build:
+      context: .
+      dockerfile: images/ros-tools/Dockerfile
+      args:
+        ROS_BASE_IMAGE: ${ROS_BASE_IMAGE:-ros:humble-ros-base}
+        ROS_DISTRO: ${ROS_DISTRO:-humble}
     container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-replay
     profiles: ["replay"]
     command: ["/opt/my-ad/scripts/replay/replay.sh"]
+
+  ros-probe:
+    <<: *dgx-common
+    image: ${ROS_TOOLS_IMAGE:-my-ad/ros-tools:humble}
+    build:
+      context: .
+      dockerfile: images/ros-tools/Dockerfile
+      args:
+        ROS_BASE_IMAGE: ${ROS_BASE_IMAGE:-ros:humble-ros-base}
+        ROS_DISTRO: ${ROS_DISTRO:-humble}
+    container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-ros-probe
+    profiles: ["harness"]
+    command: ["sleep", "infinity"]
 
   foxglove-bridge:
     <<: *dgx-common
@@ -88,20 +167,38 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-foxglove
     profiles: ["viz"]
     command: ["/opt/my-ad/scripts/ops/start-foxglove.sh"]
+    healthcheck:
+      test: ["CMD", "/opt/my-ad/scripts/ops/healthcheck-command.sh", "FOXGLOVE_HEALTHCHECK_COMMAND"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
 
   scenario-simulator:
-    <<: *dgx-common
+    <<: [*dgx-common, *dgx-gpu]
     image: ${SCENARIO_IMAGE:?SCENARIO_IMAGE must be set in .env}
     container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-scenario
     profiles: ["scenario"]
     command: ["/opt/my-ad/scripts/ops/start-scenario.sh"]
+    healthcheck:
+      test: ["CMD", "/opt/my-ad/scripts/ops/healthcheck-command.sh", "SCENARIO_HEALTHCHECK_COMMAND"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
 
   isaac-sim:
-    <<: *dgx-common
+    <<: [*dgx-common, *dgx-gpu]
     image: ${ISAAC_IMAGE:?ISAAC_IMAGE must be set in .env}
     container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-isaac
     profiles: ["isaac"]
     command: ["/opt/my-ad/scripts/ops/start-isaac.sh"]
+    healthcheck:
+      test: ["CMD", "/opt/my-ad/scripts/ops/healthcheck-command.sh", "ISAAC_HEALTHCHECK_COMMAND"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
 
   dataset-converter:
     <<: *dgx-common
@@ -111,11 +208,31 @@ services:
     image: my-ad/dataset-converter:dev
     container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-dataset-converter
     profiles: ["data"]
-    command: ["python", "/opt/my-ad/converter/convert.py", "--input", "/data/bags", "--output", "/data/datasets"]
+    command: ["--input", "/data/bags", "--output", "/data/datasets", "--source-id", "${DATASET_SOURCE_ID:-awsim}"]
 
   tensorrt-build:
-    <<: *dgx-common
+    <<: [*dgx-common, *dgx-gpu]
     image: ${TENSORRT_IMAGE:?TENSORRT_IMAGE must be set in .env}
     container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-tensorrt
     profiles: ["deploy"]
     command: ["sleep", "infinity"]
+
+  navsim:
+    <<: [*navsim-common, *navsim-gpu]
+    image: ${NAVSIM_IMAGE:?NAVSIM_IMAGE must be set in .env}
+    build:
+      context: .
+      dockerfile: images/navsim/Dockerfile
+      args:
+        NAVSIM_BASE_IMAGE: ${NAVSIM_BASE_IMAGE:-REPLACE_NAVSIM_BASE_IMAGE}
+        NAVSIM_REPO_URL: ${NAVSIM_REPO_URL:-https://github.com/autonomousvision/navsim.git}
+        NAVSIM_GIT_REF: ${NAVSIM_GIT_REF:-REPLACE_NAVSIM_GIT_REF}
+    container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-navsim
+    profiles: ["navsim"]
+    command: ["/opt/my-ad/scripts/ops/start-navsim.sh"]
+    healthcheck:
+      test: ["CMD", "/opt/my-ad/scripts/ops/healthcheck-command.sh", "NAVSIM_HEALTHCHECK_COMMAND"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

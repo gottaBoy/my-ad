@@ -10,7 +10,6 @@ x-sim-gpu: &sim-gpu
             capabilities: [gpu]
 
 x-sim-common: &sim-common
-  <<: *sim-gpu
   platform: linux/amd64
   init: true
   ipc: host
@@ -24,7 +23,13 @@ x-sim-common: &sim-common
     NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-all}
     DISPLAY: ${DISPLAY:-}
     AWSIM_COMMAND: ${AWSIM_COMMAND:-}
+    AWSIM_HEALTHCHECK_COMMAND: ${AWSIM_HEALTHCHECK_COMMAND:-}
     GROUND_TRUTH_COMMAND: ${GROUND_TRUTH_COMMAND:-}
+    GROUND_TRUTH_HEALTHCHECK_COMMAND: ${GROUND_TRUTH_HEALTHCHECK_COMMAND:-}
+    TOPIC_FILE: ${TOPIC_FILE:-/config/record/topics.txt}
+    BAG_OUTPUT_DIR: ${BAG_OUTPUT_DIR:-/data/bags}
+    BAG_NAME: ${BAG_NAME:-}
+    BAG_STORAGE: ${BAG_STORAGE:-mcap}
     SCENARIO_ID: ${SCENARIO_ID:-manual}
     MAP_VERSION: ${MAP_VERSION:-unset}
     VEHICLE_MODEL: ${VEHICLE_MODEL:-unset}
@@ -36,21 +41,22 @@ x-sim-common: &sim-common
     - ${BAGS_DIR:-./data/bags}:/data/bags
     - ${LOGS_DIR:-./data/logs}:/data/logs
     - ./config:/config:ro
-    - ./scripts/ops:/opt/my-ad/scripts:ro
+    - ./scripts:/opt/my-ad/scripts:ro
   restart: "no"
 
 services:
   awsim:
-    <<: *sim-common
+    <<: [*sim-common, *sim-gpu]
     image: ${AWSIM_IMAGE:?AWSIM_IMAGE must be set in .env}
     container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-awsim
-    command: ["/opt/my-ad/scripts/start-awsim.sh"]
+    command: ["/opt/my-ad/scripts/ops/start-awsim.sh"]
     healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/awsim.ready"]
+      test: ["CMD", "/opt/my-ad/scripts/ops/healthcheck-command.sh", "AWSIM_HEALTHCHECK_COMMAND"]
       interval: 5s
       timeout: 3s
       retries: 12
       start_period: 20s
+    stop_grace_period: 30s
 
   ground-truth:
     <<: *sim-common
@@ -59,12 +65,35 @@ services:
     profiles: ["collect"]
     depends_on:
       awsim:
-        condition: service_started
-    command: ["/opt/my-ad/scripts/start-ground-truth.sh"]
+        condition: service_healthy
+    command: ["/opt/my-ad/scripts/ops/start-ground-truth.sh"]
+    healthcheck:
+      test: ["CMD", "/opt/my-ad/scripts/ops/healthcheck-command.sh", "GROUND_TRUTH_HEALTHCHECK_COMMAND"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
 
   scenario-metadata:
     <<: *sim-common
-    image: ${ROS_BASE_IMAGE:-ros:humble-ros-base}
+    image: ${UTILITY_IMAGE:-bash:5.2}
     container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-scenario-metadata
     profiles: ["collect"]
-    command: ["/opt/my-ad/scripts/write-scenario-metadata.sh"]
+    command: ["/opt/my-ad/scripts/ops/write-scenario-metadata.sh"]
+
+  recorder-source:
+    <<: *sim-common
+    image: ${ROS_TOOLS_IMAGE:-my-ad/ros-tools:humble}
+    build:
+      context: .
+      dockerfile: images/ros-tools/Dockerfile
+      args:
+        ROS_BASE_IMAGE: ${ROS_BASE_IMAGE:-ros:humble-ros-base}
+        ROS_DISTRO: ${ROS_DISTRO:-humble}
+    container_name: ${COMPOSE_PROJECT_NAME:-my-ad}-recorder-source
+    profiles: ["record-source"]
+    depends_on:
+      awsim:
+        condition: service_healthy
+    command: ["/opt/my-ad/scripts/collect/record.sh"]
+    stop_grace_period: 60s
