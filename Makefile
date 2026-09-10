@@ -62,7 +62,7 @@ navsim:
 
 navsim-cache:
 	$(DGX_COMPOSE) --profile navsim run --rm --no-deps navsim \
-		bash -lc 'cd "$$NAVSIM_DEVKIT_ROOT/scripts" && ./run_metric_caching.sh'
+		bash -lc 'cd "$$NAVSIM_DEVKIT_ROOT/scripts/evaluation" && ./run_metric_caching.sh'
 
 data:
 	$(DGX_COMPOSE) --profile data build dataset-converter

@@ -147,3 +147,260 @@ make record-sim
 | BEVFormer 扩展无法编译 | 锁定依赖矩阵并单独构建 ARM64 训练镜像 |
 | NAVSIM 官方依赖无法在 ARM64 安装 | 锁定基础镜像和源码 ref，建立内部 requirements lock，保留失败证据 |
 | NAVSIM 无法读取 AWSIM bag | 停止直连假设，先实现 ROS/真值到 OpenScene/NAVSIM schema 的适配器 |
+
+## 6. DGX Spark 实机操作顺序
+
+以下步骤是 2026-09-10 记录的目标机落地方法。执行时必须在 DGX Spark
+上逐个 Gate 验证；前一个 Gate 不是 `PASS` 时停止，不得用 Compose 静态
+展开结果替代容器实机结果。
+
+### 6.1 获取仓库和确认主机
+
+在 DGX Spark 上获取本仓库并初始化目录：
+
+```bash
+cd ~
+git clone <仓库地址> my-ad
+cd my-ad
+
+cp .env.example .env
+make init
+```
+
+如果仓库已经复制到 DGX Spark，只执行：
+
+```bash
+cd ~/my-ad
+make init
+```
+
+检查目标机：
+
+```bash
+uname -m
+docker info --format '{{.Architecture}}'
+docker compose version
+nvidia-smi
+```
+
+DGX Spark 预期为 `aarch64`，Docker 预期为 `arm64` 或 `aarch64`，并且
+`nvidia-smi` 能看到可用 GPU。
+
+### 6.2 配置 DGX `.env`
+
+初次只验证主机和 NAVSIM 时，先使用：
+
+```dotenv
+HOST_ROLE=dgx
+PREFLIGHT_SCOPE=host
+NAVSIM_SPLIT=mini
+NAVSIM_NUM_WORKERS=1
+NAVSIM_BATCH_SIZE=1
+NAVSIM_RUN_ID=baseline-20260910
+NAVSIM_NETWORK_MODE=none
+```
+
+必须补齐以下 NAVSIM 项，不能保留 `REPLACE_`：
+
+```dotenv
+NAVSIM_IMAGE=<已验证的ARM64镜像>@sha256:<digest>
+NAVSIM_GIT_REF=<固定tag或commit>
+NAVSIM_COMMAND=<固定NAVSIM版本对应的官方评测命令>
+NAVSIM_HEALTHCHECK_COMMAND=<import、数据和地图检查命令>
+```
+
+`NAVSIM_COMMAND` 应根据锁定源码中的官方入口填写。当前 metric cache
+入口为：
+
+```text
+/workspace/navsim/scripts/evaluation/run_metric_caching.sh
+```
+
+NAVSIM 使用 `network_mode=none` 时，数据、地图、checkpoint 和 Python
+缓存必须事先准备在宿主机；运行期间不会依赖外网下载文件。
+
+### 6.3 准备固定 NAVSIM 源码和数据
+
+源码必须固定到可追溯 ref，不直接使用未固定的 `main`：
+
+```bash
+git clone https://github.com/autonomousvision/navsim.git third_party/navsim
+cd third_party/navsim
+git checkout <固定tag或commit>
+git rev-parse HEAD
+cd ../..
+```
+
+官方数据按对应 NAVSIM 版本和许可证准备到：
+
+```text
+data/navsim/dataset/
+├── maps/
+├── navsim_logs/
+└── sensor_blobs/
+```
+
+确认目录确实有内容：
+
+```bash
+find data/navsim/dataset/maps -mindepth 1 -print -quit
+find data/navsim/dataset/navsim_logs -mindepth 1 -print -quit
+find data/navsim/dataset/sensor_blobs -mindepth 1 -print -quit
+```
+
+数据下载命令、split 名称和目录结构以锁定 NAVSIM ref 的官方文档为准；
+不能用空目录或自造文件通过数据 Gate。
+
+### 6.4 执行 NAVSIM Gate
+
+先执行静态和主机检查：
+
+```bash
+make test-local
+ENV_FILE=.env make test-compose
+make preflight
+make harness-host
+```
+
+再执行 NAVSIM 检查：
+
+```bash
+make harness-navsim
+```
+
+`harness-navsim` 通过后，生成 metric cache：
+
+```bash
+make navsim-cache
+```
+
+最后运行最小 baseline：
+
+```bash
+make navsim
+find data/reports/navsim -maxdepth 3 -type f -print
+```
+
+评测报告至少要能回溯到：
+
+```text
+NAVSIM image digest
+NAVSIM git ref
+dataset checksum/version
+map version
+split
+Agent configuration
+checkpoint checksum
+random seed
+```
+
+如果没有可用的已验证 ARM64 预构建镜像，再采用源码构建：
+
+```dotenv
+NAVSIM_IMAGE=my-ad/navsim:dgx-spark-fixed
+NAVSIM_BASE_IMAGE=<已验证的linux/arm64、Python3.9、CUDA/PyTorch基础镜像>
+NAVSIM_GIT_REF=<固定commit>
+```
+
+然后执行：
+
+```bash
+make build-navsim
+make harness-navsim
+```
+
+源码构建或官方依赖在 ARM64 上失败时，结果记录为 `BLOCKED`，不能用
+QEMU 或 x86_64 结果代替 DGX Spark 通过。
+
+### 6.5 启动 Autoware 和 AWSIM 主链路
+
+NAVSIM 最小 Gate 通过后，再补齐 DGX 核心配置：
+
+```dotenv
+PREFLIGHT_SCOPE=core
+AUTOWARE_IMAGE=<已验证的ARM64 Autoware镜像>
+AUTOWARE_COMMAND=<已验证的Autoware启动命令>
+AUTOWARE_HEALTHCHECK_COMMAND=<已验证的业务健康检查命令>
+GPU_SMOKE_IMAGE=<已验证的ARM64 CUDA/PyTorch镜像>
+```
+
+在 DGX Spark 执行：
+
+```bash
+make preflight
+make harness-gpu
+make harness-network
+make harness-clock
+make build-tools
+make up-dgx
+make harness-runtime SERVICE=autoware
+make harness-ros
+```
+
+AWSIM 默认运行在独立的 x86_64 RTX 仿真主机，不作为 DGX Spark ARM64
+服务启动。x86 主机使用独立 `.env`，设置：
+
+```dotenv
+HOST_ROLE=sim-x86
+```
+
+然后执行：
+
+```bash
+make preflight
+make harness-host
+make harness-gpu
+make up-sim
+make harness-runtime SERVICE=awsim
+```
+
+两台主机的 `ROS_DOMAIN_ID`、ROS 发行版、RMW、`SIM_HOST_ADDR` 和
+`DGX_HOST_ADDR` 必须一致或正确指向对端。网络和时钟 Gate 在两端都通过后，
+再开始传感器数据采集。
+
+### 6.6 录包、回放和停止
+
+根据实际 sensor kit 修改：
+
+```text
+config/record/topics.txt
+config/harness/required-topics.txt
+```
+
+DGX 录包：
+
+```bash
+make record
+```
+
+网络无法稳定承载大点云时，在 x86 源端录包：
+
+```bash
+make build-tools-sim
+make record-sim
+```
+
+停止服务：
+
+```bash
+make down-dgx
+make down-sim
+```
+
+每次运行都保留 `artifacts/<test-id>/<UTC时间>-<主机>/` 下的 Compose、
+镜像、日志、指标和决策文件。
+
+### 6.7 当前结论边界
+
+以下结论不能互相替代：
+
+```text
+Compose 展开成功       != DGX Spark 实机通过
+容器启动成功           != NAVSIM 评测通过
+NAVSIM 评测成功        != Autoware 在线闭环通过
+ROS 2 bag 存在         != NAVSIM 数据集已经生成
+```
+
+AWSIM ROS 2 bag 到 NAVSIM OpenScene 的转换，以及 NAVSIM trajectory 到
+Autoware ROS 2 trajectory 的适配器，当前仍为 `BLOCKED`，需要单独实现和
+验证。

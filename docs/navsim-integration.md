@@ -37,7 +37,7 @@ NAVSIM OpenScene 数据结构之间需要单独的适配器；当前
 - OpenScene logs 和 sensor blobs。
 - `NUPLAN_MAP_VERSION`、`NUPLAN_MAPS_ROOT`、`NAVSIM_EXP_ROOT`、
   `NAVSIM_DEVKIT_ROOT`、`OPENSCENE_DATA_ROOT` 环境变量。
-- 先执行 `scripts/run_metric_caching.sh` 生成 metric cache。
+- 先执行 `scripts/evaluation/run_metric_caching.sh` 生成 metric cache。
 - 再使用 `scripts/evaluation/run_cv_pdm_score_evaluation.sh` 或选定的
   v2 评测入口运行 Agent。
 
