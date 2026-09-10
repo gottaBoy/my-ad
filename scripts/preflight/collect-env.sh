@@ -79,10 +79,17 @@ section() { printf '\n========== %s ==========\n' "$1"; }
   # --- NVIDIA Container Toolkit ---
   section 'NVIDIA Container Toolkit'
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    cdi_available=0
     if command -v nvidia-ctk >/dev/null 2>&1; then
       printf 'nvidia-ctk:      %s\n' "$(nvidia-ctk --version 2>/dev/null || echo 'installed, version unavailable')"
       printf 'CDI devices:\n'
-      nvidia-ctk cdi list 2>/dev/null || echo 'nvidia-ctk could not list CDI devices'
+      cdi_devices="$(nvidia-ctk cdi list 2>/dev/null || true)"
+      if [[ -n "${cdi_devices}" ]]; then
+        printf '%s\n' "${cdi_devices}"
+        [[ "${cdi_devices}" == *'nvidia.com/gpu='* ]] && cdi_available=1
+      else
+        echo 'nvidia-ctk could not list CDI devices'
+      fi
     else
       echo 'nvidia-ctk:      NOT found'
     fi
@@ -92,6 +99,9 @@ section() { printf '\n========== %s ==========\n' "$1"; }
     if [[ "${docker_runtimes}" == *'"nvidia"'* ]]; then
       echo 'nvidia runtime:  available'
       gpu_runtime_args=(--runtime=nvidia --gpus all)
+    elif [[ "${cdi_available}" == "1" ]]; then
+      echo 'nvidia runtime:  CDI devices available (runtime entry not required)'
+      gpu_runtime_args=(--gpus all)
     else
       echo 'nvidia runtime:  NOT found in Docker runtimes'
       gpu_runtime_args=(--gpus all)
