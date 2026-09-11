@@ -32,10 +32,11 @@ is_placeholder() {
 require_value() {
   local name="$1"
   local value="${!name:-}"
-  is_placeholder "${value}" && {
+  if is_placeholder "${value}"; then
     echo "${name} is not configured" >&2
     exit 78
-  }
+  fi
+  return 0
 }
 
 require_autoware_map() {

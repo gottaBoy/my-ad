@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -45,6 +48,48 @@ class ScenarioContractTest(unittest.TestCase):
             "/control/command/control_cmd",
         ):
             self.assertIn(topic, topics)
+
+    def test_scenario_up_accepts_configured_required_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            docker = fake_bin / "docker"
+            docker.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            docker.chmod(0o755)
+
+            env_file = root / ".env"
+            env_file.write_text(
+                "\n".join(
+                    (
+                        "HOST_ROLE=dgx",
+                        "SCENARIO_IMAGE=test-scenario-image",
+                        "SCENARIO_COMMAND=true",
+                        "AUTOWARE_SCENARIO_COMMAND=true",
+                        "AUTOWARE_SCENARIO_HEALTHCHECK_COMMAND=true",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            environment = os.environ.copy()
+            environment["ENV_FILE"] = str(env_file)
+            environment["PATH"] = f"{fake_bin}{os.pathsep}{environment['PATH']}"
+            result = subprocess.run(
+                [
+                    str(REPO_ROOT / "scripts/ops/run-dgx-mode.sh"),
+                    "scenario-up",
+                ],
+                cwd=REPO_ROOT,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Scenario Simulator stack started", result.stdout)
 
 
 if __name__ == "__main__":
