@@ -75,8 +75,10 @@ is_placeholder() {
 require_setting() {
   local name="$1"
   local value="${!name:-}"
-  is_placeholder "${value}" \
-    && finish "BLOCKED" "required setting is not configured: ${name}" 2
+  if is_placeholder "${value}"; then
+    finish "BLOCKED" "required setting is not configured: ${name}" 2
+  fi
+  return 0
 }
 
 expected_arch() {
@@ -238,11 +240,23 @@ case "${test_id}" in
     require_command chronyc
     require_command python3
     require_setting TIME_SYNC_MAX_OFFSET_MS
-    LC_ALL=C chronyc tracking | tee "${artifact_dir}/metrics/chrony-tracking.txt"
-    python3 scripts/harness/evaluate-clock.py \
-      --tracking "${artifact_dir}/metrics/chrony-tracking.txt" \
+    tracking_file="${artifact_dir}/metrics/chrony-tracking.txt"
+    evaluation_file="${artifact_dir}/metrics/clock-evaluation.txt"
+
+    if ! LC_ALL=C chronyc tracking >"${tracking_file}" 2>&1; then
+      cat "${tracking_file}" >&2
+      finish "FAIL" "chronyc tracking failed" 1
+    fi
+    cat "${tracking_file}"
+
+    if ! python3 scripts/harness/evaluate-clock.py \
+      --tracking "${tracking_file}" \
       --max-offset-ms "${TIME_SYNC_MAX_OFFSET_MS}" \
-      | tee "${artifact_dir}/metrics/clock-evaluation.txt"
+      >"${evaluation_file}" 2>&1; then
+      cat "${evaluation_file}" >&2
+      finish "FAIL" "clock synchronization evaluation failed" 1
+    fi
+    cat "${evaluation_file}"
     finish "PASS" "clock synchronization offset meets threshold"
     ;;
 
