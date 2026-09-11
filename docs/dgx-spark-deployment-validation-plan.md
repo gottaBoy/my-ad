@@ -13,7 +13,7 @@ Compose 为统一编排方式，逐步验证：
 
 本文档只描述部署方法、实施步骤和验收标准，不包含具体的 Compose 实现。
 
-文档基线日期：2026-09-10。
+文档基线日期：2026-09-11。
 
 ## 2. 已确认结论
 
@@ -119,7 +119,7 @@ ground truth 采集能力。
 
 | 断言 | 当前状态 | 允许的决策 |
 |---|---|---|
-| Autoware ARM64 容器可运行 | `source` | 进入 DGX Spark `local` 验证 |
+| Autoware ARM64 容器可运行 | `local` | DGX Spark 上的 `planning_simulator`、地图加载和业务健康探针已通过 |
 | AWSIM x86_64 官方发布物可运行 | `source` | 进入 x86_64 RTX 主机 `local` 验证 |
 | AWSIM ARM64 可运行 | `blocked` | 不进入实施队列，不作为备用方案 |
 | Scenario Simulator 可在 DGX Spark 运行 | `source` | 进入单机 `local` 验证 |
@@ -128,8 +128,16 @@ ground truth 采集能力。
 | NAVSIM 可直接读取 AWSIM ROS 2 bag | `blocked` | 先实现 OpenScene/NAVSIM schema 适配器 |
 | NAVSIM 可替代 AWSIM 实时闭环 | `blocked` | NAVSIM 只作为离线/伪闭环规划评测路线 |
 | AWSIM Humble 与 Autoware Jazzy 可通信 | `source` | 必须经过 Zenoh `integration` 验证 |
-| GPU 容器可用 | 待测 | 作为所有后续测试的前置门槛 |
+| GPU 容器可用 | `local` | GB10 上的 ARM64 PyTorch CUDA 运算已通过 |
 | bag 可录制并回放 | 待测 | 作为数据采集阶段的闭环门槛 |
+
+目标机证据：
+
+```text
+Host:      artifacts/host/20260910T142240Z-spark-dba5
+GPU:       artifacts/gpu/20260910T144100Z-spark-dba5
+Autoware:  artifacts/runtime/20260911T055823Z-spark-dba5
+```
 
 ## 3. 目标架构
 

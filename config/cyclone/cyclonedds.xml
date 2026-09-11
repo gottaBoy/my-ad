@@ -13,6 +13,7 @@
     </Discovery>
     <Tracing>
       <Verbosity>warning</Verbosity>
+      <OutputFile>stderr</OutputFile>
     </Tracing>
   </Domain>
 </CycloneDDS>
