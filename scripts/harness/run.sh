@@ -328,6 +328,7 @@ Usage:
   scripts/harness/run.sh host|gpu|navsim|network|clock|compose
   scripts/harness/run.sh runtime <compose-service>
   scripts/harness/run.sh ros [topic-file-in-container]
+  scripts/harness/run.sh ros /config/harness/required-topics-scenario.txt
 
 Runtime integration and e2e tests require target containers and real ROS
 evidence. This script does not report those stages as PASS without evidence.

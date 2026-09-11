@@ -21,6 +21,9 @@ Unity Linux Player 和原生插件的架构约束尚未形成可复现的 ARM64 
 NAVSIM 是独立的离线规划评测路线，不读取 ROS 2 bag，也不替代 AWSIM、
 Autoware 在线闭环或 Scenario Simulator。
 
+不同运行模式以及 NAVSIM、CARLA、BEVFormer、Isaac Lab、RL 的分级执行路线见
+[`docs/simulation-modes.md`](docs/simulation-modes.md)。
+
 ## 目录
 
 ```text
@@ -177,8 +180,9 @@ make replay
 # 构建并运行内部中间数据 manifest 转换器
 make data
 
-# 可视化、单机仿真、Isaac 和 TensorRT
+# 可视化、单机 Scenario Simulator、Isaac 和 TensorRT
 make viz
+make scenario-prepare
 make scenario
 make isaac
 make deploy

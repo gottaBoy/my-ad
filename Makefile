@@ -5,8 +5,8 @@ DGX_COMPOSE := docker compose --env-file $(ENV_FILE) -f compose.dgx.yaml
 SIM_COMPOSE := docker compose --env-file $(ENV_FILE) -f compose.sim-x86.yaml
 
 .PHONY: init preflight config build-tools build-tools-sim build-navsim up-dgx up-sim collect-sim down-dgx down-sim \
-	record record-sim replay viz scenario isaac navsim navsim-cache data deploy test-compose test-local \
-	harness-host harness-gpu harness-network harness-clock harness-runtime harness-ros harness-navsim collect-env
+	record record-sim replay viz scenario scenario-up scenario-prepare isaac navsim navsim-cache data deploy test-compose test-local \
+	harness-host harness-gpu harness-network harness-clock harness-runtime harness-ros harness-ros-scenario harness-navsim collect-env
 
 init:
 	mkdir -p data/maps data/bags data/ground_truth data/datasets data/models data/engines data/logs data/reports data/cache \
@@ -31,7 +31,7 @@ build-tools-sim:
 	$(SIM_COMPOSE) --profile record-source build recorder-source
 
 up-dgx:
-	$(DGX_COMPOSE) up -d autoware
+	ENV_FILE="$(ENV_FILE)" ./scripts/ops/run-dgx-mode.sh planning
 
 up-sim:
 	$(SIM_COMPOSE) up -d awsim
@@ -52,7 +52,13 @@ viz:
 	$(DGX_COMPOSE) --profile viz up -d foxglove-bridge
 
 scenario:
-	$(DGX_COMPOSE) --profile scenario up -d scenario-simulator autoware
+	ENV_FILE="$(ENV_FILE)" ./scripts/ops/run-dgx-mode.sh scenario
+
+scenario-up:
+	ENV_FILE="$(ENV_FILE)" ./scripts/ops/run-dgx-mode.sh scenario-up
+
+scenario-prepare:
+	ENV_FILE="$(ENV_FILE)" ./scripts/ops/prepare-scenario.sh
 
 isaac:
 	$(DGX_COMPOSE) --profile isaac up -d isaac-sim autoware
@@ -99,6 +105,9 @@ harness-runtime:
 
 harness-ros:
 	ENV_FILE="$(ENV_FILE)" ./scripts/harness/run.sh ros
+
+harness-ros-scenario:
+	ENV_FILE="$(ENV_FILE)" ./scripts/harness/run.sh ros /config/harness/required-topics-scenario.txt
 
 harness-navsim:
 	ENV_FILE="$(ENV_FILE)" ./scripts/harness/run.sh navsim

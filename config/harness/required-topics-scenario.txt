@@ -1,0 +1,8 @@
+# Minimal DGX Scenario Simulator contract.
+# This intentionally omits AWSIM camera/LiDAR topics.
+/clock
+/tf
+/tf_static
+/vehicle/status/velocity_status
+/planning/trajectory
+/control/command/control_cmd

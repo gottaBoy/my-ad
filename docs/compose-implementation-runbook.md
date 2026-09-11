@@ -52,7 +52,9 @@ NAVSIM 使用独立的 `navsim` profile 和一次性 Job。优先使用内部验
 ARM64 镜像；需要二开时可通过 `images/navsim/Dockerfile` 从固定 git ref
 构建。官方依赖包含旧版 PyTorch 和 GIS 二进制包，源码 Dockerfile 只是构建
 入口，不代表 ARM64/CUDA 13 已验证。详细步骤见
-[`navsim-integration.md`](navsim-integration.md)。
+[`navsim-integration.md`](navsim-integration.md)。不同运行模式以及 NAVSIM、
+CARLA、BEVFormer、Isaac Lab、RL 的分级执行路线见
+[`simulation-modes.md`](simulation-modes.md)。
 
 ## 3. 运行证据
 
@@ -104,6 +106,18 @@ make harness-runtime SERVICE=awsim
 make harness-runtime SERVICE=autoware
 make harness-ros
 ```
+
+没有 x86_64 AWSIM 主机时，在 DGX Spark 使用 Scenario Simulator：
+
+```bash
+make scenario-prepare
+make scenario
+make harness-ros-scenario
+```
+
+Scenario Simulator 使用 `scenario_simulation:=true` 启动 Autoware，并使用
+`launch_autoware:=false` 启动外部场景解释器；它验证的是场景级 ROS 2 交互，
+不等于 AWSIM 的相机、LiDAR 和 Unity 渲染闭环。
 
 NAVSIM 是独立离线 Gate，不依赖 AWSIM/Autoware 同时运行：
 
