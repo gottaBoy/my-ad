@@ -38,6 +38,14 @@ require_value() {
   }
 }
 
+require_autoware_map() {
+  local map_dir="${MAPS_DIR:-./data/maps}"
+  [[ -s "${map_dir}/lanelet2_map.osm" && -s "${map_dir}/pointcloud_map.pcd" ]] || {
+    echo "both lanelet2_map.osm and pointcloud_map.pcd are required under ${map_dir}" >&2
+    exit 66
+  }
+}
+
 wait_for_healthy() {
   local service="$1"
   local timeout_sec="${2:-180}"
@@ -83,6 +91,7 @@ case "${mode}" in
       echo "AUTOWARE_PLANNING_HEALTHCHECK_COMMAND or AUTOWARE_HEALTHCHECK_COMMAND is not configured" >&2
       exit 78
     }
+    require_autoware_map
     AUTOWARE_COMMAND="${planning_command}" \
     AUTOWARE_HEALTHCHECK_COMMAND="${planning_healthcheck}" \
       "${compose[@]}" up -d --force-recreate autoware
@@ -124,11 +133,7 @@ case "${mode}" in
       echo "scenario file not found: ${scenario_file}; run make scenario-prepare" >&2
       exit 66
     }
-    map_dir="${MAPS_DIR:-./data/maps}"
-    [[ -s "${map_dir}/lanelet2_map.osm" && -s "${map_dir}/pointcloud_map.pcd" ]] || {
-      echo "both map files are required under ${map_dir}" >&2
-      exit 66
-    }
+    require_autoware_map
     mkdir -p data/reports/scenario
 
     AUTOWARE_COMMAND="${scenario_autoware_command}" \

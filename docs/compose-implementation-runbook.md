@@ -213,11 +213,28 @@ DGX Spark 预期为 `aarch64`，Docker 预期为 `arm64` 或 `aarch64`，并且
 
 ### 6.2 配置 DGX `.env`
 
-初次只验证主机和 NAVSIM 时，先使用：
+`.env.example` 默认包含 2026-09-11 已在 DGX Spark 验证通过的核心配置：
 
 ```dotenv
 HOST_ROLE=dgx
-PREFLIGHT_SCOPE=host
+PREFLIGHT_SCOPE=core
+MAPS_DIR=./data/maps/sample-map-planning
+```
+
+Autoware ARM64 镜像、planning simulator 命令、业务健康探针和 GPU smoke
+镜像也已提供默认值。只需确认以下地图文件存在：
+
+```text
+data/maps/sample-map-planning/lanelet2_map.osm
+data/maps/sample-map-planning/pointcloud_map.pcd
+```
+
+AWSIM、Foxglove、Isaac、NAVSIM、TensorRT 和 ground-truth 的 `REPLACE_*`
+配置属于可选 profile，不影响 DGX 核心 preflight 和 planning baseline。
+
+启用 NAVSIM 时，建议保留以下保守运行参数：
+
+```dotenv
 NAVSIM_SPLIT=mini
 NAVSIM_NUM_WORKERS=1
 NAVSIM_BATCH_SIZE=1
@@ -339,15 +356,8 @@ QEMU 或 x86_64 结果代替 DGX Spark 通过。
 
 ### 6.5 启动 Autoware 和 AWSIM 主链路
 
-NAVSIM 最小 Gate 通过后，再补齐 DGX 核心配置：
-
-```dotenv
-PREFLIGHT_SCOPE=core
-AUTOWARE_IMAGE=<已验证的ARM64 Autoware镜像>
-AUTOWARE_COMMAND=<已验证的Autoware启动命令>
-AUTOWARE_HEALTHCHECK_COMMAND=<已验证的业务健康检查命令>
-GPU_SMOKE_IMAGE=<已验证的ARM64 CUDA/PyTorch镜像>
-```
+DGX 核心默认值无需再次填写。生产部署或替换地图、车辆、sensor kit 时，
+再覆盖 `AUTOWARE_IMAGE`、`AUTOWARE_COMMAND` 和健康探针并重新验证。
 
 在 DGX Spark 执行：
 

@@ -68,23 +68,27 @@ cp .env.example .env
 make init
 ```
 
-编辑 `.env`：
+`.env.example` 默认就是已在 DGX Spark 验证过的 ARM64 核心基线：
 
-- x86_64 主机设置 `HOST_ROLE=sim-x86`。
-- DGX Spark 设置 `HOST_ROLE=dgx`。
-- 模板默认 `PREFLIGHT_SCOPE=host`，先完成宿主机检查；核心镜像、启动命令、
-  健康探针、GPU smoke 镜像和地图就绪后再切换为 `core`。
-- 首先替换当前主机核心路径需要的 `REPLACE_` 镜像、启动命令和健康探针。
-- 启用可选 profile 前，再替换该 profile 对应的配置。
+- `HOST_ROLE=dgx`、`PREFLIGHT_SCOPE=core`。
+- 固定 digest 的 Autoware CUDA 镜像和 GPU smoke 镜像。
+- headless `planning_simulator` 启动命令和 `/map/vector_map` 健康探针。
+- `MAPS_DIR=./data/maps/sample-map-planning`。
+
+将 `lanelet2_map.osm` 和 `pointcloud_map.pcd` 放入上述目录后，DGX 核心路径
+不需要再修改 `.env`。其他情况按需编辑：
+
+- x86_64 主机设置 `HOST_ROLE=sim-x86`，并配置 AWSIM 相关 `REPLACE_*` 项。
+- 启用 Foxglove、Isaac、NAVSIM、TensorRT 或 ground-truth profile 前，
+  替换该 profile 对应的 `REPLACE_*` 项。
 - 固定正式镜像的 tag 和 digest。
 - 两台主机使用相同的 `ROS_DOMAIN_ID`、ROS 发行版和 RMW。
-- 配置 `SIM_HOST_ADDR`、`DGX_HOST_ADDR`。
-- 将实际地图放入 `MAPS_DIR`。
+- 运行跨主机 Gate 时，配置真实的 `SIM_HOST_ADDR`、`DGX_HOST_ADDR`。
 
 `.env` 按普通 `KEY=value` 解析，不作为 Shell 执行。包含空格的命令必须使用
 单引号或双引号包围。
 
-核心路径可以保留未启用 profile 的占位项。正式全链路部署前检查：
+DGX 核心路径可以保留未启用 profile 的占位项。正式全链路部署前检查：
 
 ```bash
 rg 'REPLACE_' .env
@@ -158,8 +162,9 @@ make harness-runtime SERVICE=autoware
 make harness-ros
 ```
 
-`AUTOWARE_COMMAND` 必须是所选 Autoware 镜像中已验证的启动命令。仓库不会
-猜测地图、车辆模型、sensor kit 或 launch 文件名。
+模板中的 `AUTOWARE_COMMAND` 是当前已验证的 sample map、`sample_vehicle`
+和 `sample_sensor_kit` 基线。切换生产地图、车辆或 sensor kit 时必须同步
+覆盖命令并重新执行 Gate。
 
 ### 3. 启动可选服务
 

@@ -9,11 +9,13 @@ SIM_COMPOSE := docker compose --env-file $(ENV_FILE) -f compose.sim-x86.yaml
 	harness-host harness-gpu harness-network harness-clock harness-runtime harness-ros harness-ros-scenario harness-navsim collect-env
 
 init:
-	mkdir -p data/maps data/bags data/ground_truth data/datasets data/models data/engines data/logs data/reports data/cache \
+	mkdir -p data/maps/sample-map-planning data/bags data/ground_truth data/datasets data/models data/engines data/logs data/reports data/cache \
 		data/navsim/dataset/maps data/navsim/exp data/models/navsim data/reports/navsim data/cache/navsim \
 		third_party/navsim artifacts
 	@test -f "$(ENV_FILE)" || cp .env.example "$(ENV_FILE)"
-	@echo "Review $(ENV_FILE) and replace every REPLACE_ value before starting containers."
+	@echo "DGX core defaults are configured in $(ENV_FILE)."
+	@echo "Place lanelet2_map.osm and pointcloud_map.pcd in data/maps/sample-map-planning."
+	@echo "Replace REPLACE_* values only before enabling their optional profiles."
 
 preflight:
 	ENV_FILE="$(ENV_FILE)" ./scripts/preflight/check.sh

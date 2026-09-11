@@ -124,7 +124,13 @@ if [[ "${scope}" != "host" ]]; then
 
   if [[ "${REQUIRE_MAP_DATA:-1}" == "1" ]]; then
     map_dir="${MAPS_DIR:-./data/maps}"
-    if find "${map_dir}" -mindepth 1 -print -quit | grep -q .; then
+    if [[ "${role}" == "dgx" ]]; then
+      if [[ -s "${map_dir}/lanelet2_map.osm" && -s "${map_dir}/pointcloud_map.pcd" ]]; then
+        pass "Autoware map files present in ${map_dir}"
+      else
+        fail "expected lanelet2_map.osm and pointcloud_map.pcd in ${map_dir}"
+      fi
+    elif find "${map_dir}" -mindepth 1 -print -quit | grep -q .; then
       pass "map data present in ${map_dir}"
     else
       fail "map data is empty in ${map_dir}"
