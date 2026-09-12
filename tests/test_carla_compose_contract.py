@@ -10,7 +10,11 @@ class CarlaComposeContractTest(unittest.TestCase):
         compose = (REPO_ROOT / "compose.carla-arm64.yaml").read_text()
         self.assertIn("platform: linux/arm64", compose)
         self.assertIn('profiles: ["g0"]', compose)
+        self.assertIn('profiles: ["build"]', compose)
         self.assertIn("carla-g0-probe", compose)
+        self.assertIn("entrypoint: []", compose)
+        self.assertIn("CARLA_UNREAL_ENGINE_PATH: /workspace/unreal-engine", compose)
+        self.assertIn(":rw", compose)
         self.assertNotIn("/var/run/docker.sock", compose)
 
     def test_source_lock_pins_all_primary_forks(self) -> None:

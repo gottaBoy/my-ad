@@ -233,6 +233,10 @@ python-cache
 artifacts
 ```
 
+当前实现先提供两个开发 profile：`g0` 只读检查源码和工具链，`build` 使用
+读写挂载运行 Unreal/CARLA 构建。执行 `make carla-shell` 不会修改源码；执行
+`make carla-build-shell` 才进入允许生成 Build、Engine 和 Content 的容器。
+
 构建不需要挂载 `/var/run/docker.sock`。Docker buildx 的 amd64 模拟也不应
 用于 CARLA Server 正式构建。
 

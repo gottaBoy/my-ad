@@ -28,3 +28,20 @@ services:
     image: ${CARLA_TOOLCHAIN_IMAGE:-my-ad/carla-toolchain:arm64}
     profiles: ["g0"]
     command: ["/usr/local/bin/carla-g0-probe"]
+
+  carla-build:
+    <<: *carla-common
+    build:
+      context: .
+      dockerfile: images/carla-arm64/Dockerfile
+    image: ${CARLA_TOOLCHAIN_IMAGE:-my-ad/carla-toolchain:arm64}
+    profiles: ["build"]
+    entrypoint: []
+    environment:
+      CARLA_UNREAL_ENGINE_PATH: /workspace/unreal-engine
+    volumes:
+      - ${CARLA_SOURCE_DIR:-./third_party/carla}:/workspace/carla:rw
+      - ${CARLA_UE_DIR:-./data/carla/unreal-engine}:/workspace/unreal-engine:rw
+      - ${CARLA_ARTIFACT_DIR:-./artifacts/carla}:/artifacts/carla
+      - ./scripts:/opt/my-ad/scripts:ro
+    command: ["bash"]

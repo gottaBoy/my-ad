@@ -10,7 +10,7 @@ CARLA_COMPOSE := docker compose --env-file $(ENV_FILE) -f compose.carla-arm64.ya
 .PHONY: init preflight config build-tools build-tools-sim build-navsim up-dgx up-sim collect-sim down-dgx down-sim \
 	record record-sim replay viz scenario scenario-up scenario-prepare isaac navsim navsim-cache data deploy test-compose test-local \
 	harness-host harness-gpu harness-network harness-clock harness-runtime harness-ros harness-ros-scenario harness-navsim inspect-modules learn-module collect-env \
-	carla-config carla-g0 carla-shell
+	carla-config carla-g0 carla-shell carla-build-shell
 
 init:
 	mkdir -p data/maps/sample-map-planning data/bags data/ground_truth data/datasets data/models data/engines data/logs data/reports data/cache \
@@ -65,6 +65,9 @@ carla-g0:
 
 carla-shell:
 	$(CARLA_COMPOSE) --profile g0 run --rm carla-dev bash
+
+carla-build-shell:
+	$(CARLA_COMPOSE) --profile build run --rm carla-build bash
 
 scenario:
 	ENV_FILE="$(ENV_FILE)" ./scripts/ops/run-dgx-mode.sh scenario
