@@ -30,7 +30,7 @@ CARLA UE5.5 的官方 Linux 文档要求 Ubuntu 22.04 或更高版本，并不�
 
 | 仓库 | 分支/版本 | 当前 commit | 作用 |
 |---|---|---|---|
-| `gottaBoy/carla` | `dgx-arm64` | `6afb2094a68939fcc0284c5f1cc42e38f07ab996` | UE5.5 / native ROS 2 / initial ARM64 patch |
+| `gottaBoy/carla` | `dgx-arm64`（基于 `ue5-dev`） | `6afb2094a68939fcc0284c5f1cc42e38f07ab996` | UE5.5 / native ROS 2 / initial ARM64 patch |
 | `gottaBoy/carla` | `ue4/0.9.16` | `1cd0f377a0632c788e98dfad4677e4daf8845c08` | 旧版 CARLA 对照线 |
 | `gottaBoy/carla` | `ue58-dev` | `5684efc317185244c6474dfb88d4b3651e2f1924` | UE5.8 后续实验 |
 | `gottaBoy/ros-bridge` | `master` | `e9063d97ff5a724f76adbb1b852dc71da1dcfeec` | CARLA 0.9.13 旧 bridge |

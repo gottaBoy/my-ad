@@ -29,6 +29,7 @@ class CarlaComposeContractTest(unittest.TestCase):
         ):
             self.assertIn(repository, lock)
         self.assertIn("primary_carla_route: gottaBoy/carla@dgx-arm64", lock)
+        self.assertIn("base_ref: ue5-dev", lock)
 
 
 if __name__ == "__main__":
