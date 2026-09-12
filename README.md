@@ -40,8 +40,10 @@ artifacts/                 # Harness 证据
 docs/                      # 方案和验证文档
 ```
 
-按 sensing、localization、perception、fusion、planning、control 逐级学习
-现有 demo，见 [`docs/autoware-learning-lab.md`](docs/autoware-learning-lab.md)。
+当前学习主线临时优先从 CARLA 开始。DGX Spark 的 Docker、ARM64、fork、native
+ROS 2、Autoware bridge 和分阶段 Gate 见 [`docs/carla-dgx-audit.md`](docs/carla-dgx-audit.md)。
+CARLA 通过后，再按 sensing、localization、perception、fusion、planning、control
+阅读 [`docs/autoware-learning-lab.md`](docs/autoware-learning-lab.md)。
 
 ## 前置条件
 

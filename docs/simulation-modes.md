@@ -43,6 +43,11 @@ L0 环境证据
 能够在 DGX Spark 上运行；它不能证明 AWSIM、相机、LiDAR、完整感知、跨主机
 网络或真实传感器闭环。
 
+当前学习主线临时切换到 CARLA。DGX Spark 只有 ARM64，因此 CARLA 路线必须先
+通过独立的 Docker/源码 Gate；详细 fork、分支、bridge、Autoware 和 native ROS 2
+边界见 [`carla-dgx-audit.md`](carla-dgx-audit.md)。这不改变现有 AWSIM、Scenario
+Simulator 或 Autoware runtime 的证据状态。
+
 各例子与学习模块的对应关系如下：
 
 | 例子 | sensing | localization | perception | fusion | planning | control |
