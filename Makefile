@@ -6,7 +6,7 @@ SIM_COMPOSE := docker compose --env-file $(ENV_FILE) -f compose.sim-x86.yaml
 
 .PHONY: init preflight config build-tools build-tools-sim build-navsim up-dgx up-sim collect-sim down-dgx down-sim \
 	record record-sim replay viz scenario scenario-up scenario-prepare isaac navsim navsim-cache data deploy test-compose test-local \
-	harness-host harness-gpu harness-network harness-clock harness-runtime harness-ros harness-ros-scenario harness-navsim collect-env
+	harness-host harness-gpu harness-network harness-clock harness-runtime harness-ros harness-ros-scenario harness-navsim inspect-modules collect-env
 
 init:
 	mkdir -p data/maps/sample-map-planning data/bags data/ground_truth data/datasets data/models data/engines data/logs data/reports data/cache \
@@ -110,6 +110,10 @@ harness-ros:
 
 harness-ros-scenario:
 	ENV_FILE="$(ENV_FILE)" ./scripts/harness/run.sh ros /config/harness/required-topics-scenario.txt
+
+inspect-modules:
+	$(DGX_COMPOSE) --profile harness run --build --rm --no-deps ros-probe \
+		/opt/my-ad/scripts/harness/inspect-modules.sh /config/harness/module-topics.txt "$(MODULE)"
 
 harness-navsim:
 	ENV_FILE="$(ENV_FILE)" ./scripts/harness/run.sh navsim

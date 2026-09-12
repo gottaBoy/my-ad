@@ -8,6 +8,11 @@
 
 ## 1. 先看结论
 
+如果目标是边运行边学习 sensing、localization、perception、fusion、
+planning 和 control，请先看
+[`autoware-learning-lab.md`](autoware-learning-lab.md)。本文保留运行模式、
+证据等级和仿真器边界；学习手册提供逐条命令和 topic 观察方法。
+
 当前 DGX Spark 已经有以下实机证据：
 
 | 能力 | 证据 | 结论 |
@@ -37,6 +42,22 @@ L0 环境证据
 `planning_simulator` 能证明 Autoware、地图、DDS、GPU 容器和业务健康探针
 能够在 DGX Spark 上运行；它不能证明 AWSIM、相机、LiDAR、完整感知、跨主机
 网络或真实传感器闭环。
+
+各例子与学习模块的对应关系如下：
+
+| 例子 | sensing | localization | perception | fusion | planning | control |
+|---|---|---|---|---|---|---|
+| Autoware `planning_simulator` | - | 可观察 | 可观察接口 | - | 可运行 | 可观察 |
+| Scenario Simulator | 场景输入有限 | 可观察 | - | - | 固定场景 | 场景接口 |
+| AWSIM / CARLA | 原始传感器 | 可运行 | 可运行 | 可运行 | 可运行 | 可闭环 |
+| rosbag 回放 | 可重复输入 | 可重复调试 | 可重复调试 | 可重复调试 | 可重复调试 | 可重复调试 |
+| NAVSIM | 离线输入 | 数据提供 | 离线输入 | 取决于 Agent | 离线评测 | 不直接接入 |
+| BEVFormer | 图像输入 | 依赖外部 TF | 模型主体 | 可扩展 | 不负责 | 不负责 |
+| Isaac Lab + RL | 环境状态 | 环境提供 | 不负责 | 不负责 | 可训练 | 可训练 |
+
+“可观察”只表示当前运行态有对应 ROS 接口，不表示算法结果已经正确；
+`-` 表示该例子默认不提供这类输入或模块。逐条命令、观察 topic 和证据
+边界见 [`autoware-learning-lab.md`](autoware-learning-lab.md)。
 
 ## 2. 通用规则
 
@@ -140,8 +161,12 @@ Scenario Simulator 适合在没有 x86 AWSIM 主机时验证 Autoware 的场景�
 ```bash
 make scenario-prepare
 make scenario
-make harness-ros-scenario
 ```
+
+如果要观察场景运行期间的话题，应在另一个终端执行
+`make harness-ros-scenario` 或 `make inspect-modules`。`make scenario` 是一次性
+前台命令，场景结束后容器会停止；场景结束后再运行 ROS discovery probe，
+通常已经没有可发现的场景话题。
 
 `make scenario` 的行为是：
 
@@ -480,7 +505,13 @@ make up-dgx
 make harness-runtime SERVICE=autoware
 make scenario-prepare
 make scenario
+```
+
+如果要在场景运行期间观察 ROS 话题，应在另一个终端执行：
+
+```bash
 make harness-ros-scenario
+make inspect-modules
 ```
 
 Scenario Simulator 通过后再开始 NAVSIM 或 BEVFormer 的独立实验。不要在

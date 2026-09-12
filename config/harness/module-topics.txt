@@ -1,0 +1,17 @@
+# module|topic|what to inspect
+simulation|/clock|simulation time
+localization|/tf|map/odom/base_link transform tree
+localization|/tf_static|static sensor and vehicle transforms
+localization|/localization/kinematic_state|ego pose, velocity, and acceleration
+sensing|/sensing/camera/camera0/image_raw|raw camera input
+sensing|/sensing/lidar/top/pointcloud_raw|raw LiDAR input
+sensing|/sensing/lidar/concatenated/pointcloud|preprocessed LiDAR input
+perception|/perception/object_recognition/objects|recognized and tracked objects
+perception|/perception/traffic_light_recognition/traffic_signals|traffic signal result
+fusion|/perception/object_recognition/objects|object output; confirm the producing nodes before calling it fused
+planning|/map/vector_map|vector map consumed by planning
+planning|/planning/mission_planning/route|mission route
+planning|/planning/trajectory|trajectory sent to control
+control|/vehicle/status/velocity_status|vehicle feedback used by control
+control|/control/trajectory_follower/control_cmd|trajectory follower command
+control|/control/command/control_cmd|gated vehicle command

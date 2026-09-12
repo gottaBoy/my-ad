@@ -40,6 +40,9 @@ artifacts/                 # Harness 证据
 docs/                      # 方案和验证文档
 ```
 
+按 sensing、localization、perception、fusion、planning、control 逐级学习
+现有 demo，见 [`docs/autoware-learning-lab.md`](docs/autoware-learning-lab.md)。
+
 ## 前置条件
 
 ### DGX Spark
@@ -160,11 +163,20 @@ make build-tools
 make up-dgx
 make harness-runtime SERVICE=autoware
 make harness-ros
+make inspect-modules
+# 只观察一个模块时：
+make inspect-modules MODULE=localization
+make inspect-modules MODULE=planning
+make inspect-modules MODULE=control
 ```
 
 模板中的 `AUTOWARE_COMMAND` 是当前已验证的 sample map、`sample_vehicle`
 和 `sample_sensor_kit` 基线。切换生产地图、车辆或 sensor kit 时必须同步
 覆盖命令并重新执行 Gate。
+
+`make inspect-modules` 是学习和排障用的 ROS 观察命令，会按模块列出当前发现
+的话题和候选处理节点。它不会把缺失的相机、LiDAR 或融合输出误报为完整
+感知闭环通过。
 
 ### 3. 启动可选服务
 

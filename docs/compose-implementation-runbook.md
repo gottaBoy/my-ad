@@ -112,12 +112,21 @@ make harness-ros
 ```bash
 make scenario-prepare
 make scenario
-make harness-ros-scenario
 ```
 
 Scenario Simulator 使用 `scenario_simulation:=true` 启动 Autoware，并使用
 `launch_autoware:=false` 启动外部场景解释器；它验证的是场景级 ROS 2 交互，
 不等于 AWSIM 的相机、LiDAR 和 Unity 渲染闭环。
+
+需要观察场景运行期间的 ROS 话题时，在另一个终端执行：
+
+```bash
+make harness-ros-scenario
+make inspect-modules
+```
+
+`make scenario` 是一次性前台运行，场景成功退出后容器会停止；不要把场景
+结束后才执行的 discovery probe 当成场景运行期间的 ROS 证据。
 
 NAVSIM 是独立离线 Gate，不依赖 AWSIM/Autoware 同时运行：
 
