@@ -2,7 +2,7 @@ schema: 1
 
 sources:
   carla:
-    repository: https://github.com/gottaBoy/carla.git
+    repository: git@github.com:gottaBoy/carla.git
     ref: dgx-arm64
     commit: 6afb2094a68939fcc0284c5f1cc42e38f07ab996
     role: CARLA UE5.5 and native ROS 2 source

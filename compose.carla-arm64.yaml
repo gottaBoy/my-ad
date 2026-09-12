@@ -6,7 +6,7 @@ x-carla-common: &carla-common
   ipc: host
   network_mode: ${CARLA_NETWORK_MODE:-host}
   environment:
-    CARLA_SOURCE_REPO: ${CARLA_SOURCE_REPO:-https://github.com/gottaBoy/carla.git}
+    CARLA_SOURCE_REPO: ${CARLA_SOURCE_REPO:-git@github.com:gottaBoy/carla.git}
     CARLA_SOURCE_REF: ${CARLA_SOURCE_REF:-dgx-arm64}
     CARLA_SOURCE_COMMIT: ${CARLA_SOURCE_COMMIT:-6afb2094a68939fcc0284c5f1cc42e38f07ab996}
     CARLA_SOURCE_DIR: /workspace/carla
