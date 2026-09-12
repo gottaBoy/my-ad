@@ -1,0 +1,30 @@
+name: ${CARLA_COMPOSE_PROJECT_NAME:-my-ad-carla}
+
+x-carla-common: &carla-common
+  platform: linux/arm64
+  init: true
+  ipc: host
+  network_mode: ${CARLA_NETWORK_MODE:-host}
+  environment:
+    CARLA_SOURCE_REPO: ${CARLA_SOURCE_REPO:-https://github.com/gottaBoy/carla.git}
+    CARLA_SOURCE_REF: ${CARLA_SOURCE_REF:-dgx-arm64}
+    CARLA_SOURCE_COMMIT: ${CARLA_SOURCE_COMMIT:-6afb2094a68939fcc0284c5f1cc42e38f07ab996}
+    CARLA_SOURCE_DIR: /workspace/carla
+    CARLA_UE_DIR: /workspace/unreal-engine
+    CARLA_ARTIFACT_DIR: /artifacts/carla
+  volumes:
+    - ${CARLA_SOURCE_DIR:-./third_party/carla}:/workspace/carla:ro
+    - ${CARLA_UE_DIR:-./data/carla/unreal-engine}:/workspace/unreal-engine:ro
+    - ${CARLA_ARTIFACT_DIR:-./artifacts/carla}:/artifacts/carla
+    - ./scripts:/opt/my-ad/scripts:ro
+  restart: "no"
+
+services:
+  carla-dev:
+    <<: *carla-common
+    build:
+      context: .
+      dockerfile: images/carla-arm64/Dockerfile
+    image: ${CARLA_TOOLCHAIN_IMAGE:-my-ad/carla-toolchain:arm64}
+    profiles: ["g0"]
+    command: ["/usr/local/bin/carla-g0-probe"]

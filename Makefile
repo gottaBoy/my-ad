@@ -5,10 +5,12 @@ MODULE ?=
 DURATION ?= 5
 DGX_COMPOSE := docker compose --env-file $(ENV_FILE) -f compose.dgx.yaml
 SIM_COMPOSE := docker compose --env-file $(ENV_FILE) -f compose.sim-x86.yaml
+CARLA_COMPOSE := docker compose --env-file $(ENV_FILE) -f compose.carla-arm64.yaml
 
 .PHONY: init preflight config build-tools build-tools-sim build-navsim up-dgx up-sim collect-sim down-dgx down-sim \
 	record record-sim replay viz scenario scenario-up scenario-prepare isaac navsim navsim-cache data deploy test-compose test-local \
-	harness-host harness-gpu harness-network harness-clock harness-runtime harness-ros harness-ros-scenario harness-navsim inspect-modules learn-module collect-env
+	harness-host harness-gpu harness-network harness-clock harness-runtime harness-ros harness-ros-scenario harness-navsim inspect-modules learn-module collect-env \
+	carla-config carla-g0 carla-shell
 
 init:
 	mkdir -p data/maps/sample-map-planning data/bags data/ground_truth data/datasets data/models data/engines data/logs data/reports data/cache \
@@ -54,6 +56,15 @@ replay:
 
 viz:
 	$(DGX_COMPOSE) --profile viz up -d foxglove-bridge
+
+carla-config:
+	$(CARLA_COMPOSE) config --quiet
+
+carla-g0:
+	$(CARLA_COMPOSE) --profile g0 run --rm carla-dev
+
+carla-shell:
+	$(CARLA_COMPOSE) --profile g0 run --rm carla-dev bash
 
 scenario:
 	ENV_FILE="$(ENV_FILE)" ./scripts/ops/run-dgx-mode.sh scenario

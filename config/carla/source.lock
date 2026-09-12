@@ -1,0 +1,43 @@
+schema: 1
+
+sources:
+  carla:
+    repository: https://github.com/gottaBoy/carla.git
+    ref: dgx-arm64
+    commit: 6afb2094a68939fcc0284c5f1cc42e38f07ab996
+    role: CARLA UE5.5 and native ROS 2 source
+  ros_bridge_legacy:
+    repository: https://github.com/gottaBoy/ros-bridge.git
+    ref: master
+    commit: e9063d97ff5a724f76adbb1b852dc71da1dcfeec
+    carla_version: 0.9.13
+    role: isolated legacy comparison only
+  autoware_carla_bridge:
+    repository: https://github.com/gottaBoy/autoware_carla_bridge.git
+    ref: main
+    commit: d1a135042d88ab72d55ea73b18b65351c81838d6
+    carla_version: 0.9.16
+    role: Rust direct RPC Autoware adapter
+  autoware_universe:
+    repository: https://github.com/gottaBoy/autoware_universe.git
+    ref: humble
+    commit: 02a589200c1af644ca4b4cb3ed98695b4b62118b
+    role: Autoware Humble source
+  autoware_launch:
+    repository: https://github.com/gottaBoy/autoware_launch.git
+    ref: humble
+    commit: f942598d44b5769353167c76b784323d5c14c8c7
+    role: Autoware Humble launch and sensor configuration
+  nano_ros:
+    repository: https://github.com/gottaBoy/nano-ros.git
+    ref: main
+    commit: 9a477cc8177d431a1b007768275af89696bb00e28
+    role: optional embedded/RTOS ROS 2 client, not the desktop data plane
+
+decisions:
+  primary_carla_route: gottaBoy/carla@dgx-arm64
+  primary_autoware_adapter: gottaBoy/autoware_carla_bridge@main
+  primary_autoware_branch: humble
+  legacy_bridge_profile: gottaBoy/ros-bridge@master with CARLA 0.9.13 only
+  native_ros2_and_legacy_bridge_same_domain: forbidden
+  qemu_amd64_as_support_evidence: forbidden

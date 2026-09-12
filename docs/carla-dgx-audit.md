@@ -21,11 +21,16 @@ Docker 隔离用户态依赖，但不会改变宿主机 CPU 架构，也不会�
 驱动。`linux/amd64` 镜像在本机通过 QEMU 运行，只能作为实验，不作为 CARLA
 Server、GPU 渲染或性能通过证据。
 
+CARLA UE5.5 的官方 Linux 文档要求 Ubuntu 22.04 或更高版本，并不表示只能
+使用 Ubuntu 22.04。当前宿主机保持 Ubuntu 24.04；构建容器选择 Ubuntu 22.04，
+是为了复用官方 Docker 开发基线、减少编译器和 ROS 2 Humble 依赖漂移。该容器
+本身仍是 ARM64，不能解决 Unreal/CARLA 的 ARM64 目标适配问题。
+
 ## 2. Fork 基线
 
 | 仓库 | 分支/版本 | 当前 commit | 作用 |
 |---|---|---|---|
-| `gottaBoy/carla` | `ue5-dev` | `1360bb9aff0f1aaa6216876ceee777528128306f` | UE5.5 / native ROS 2 |
+| `gottaBoy/carla` | `dgx-arm64` | `6afb2094a68939fcc0284c5f1cc42e38f07ab996` | UE5.5 / native ROS 2 / initial ARM64 patch |
 | `gottaBoy/carla` | `ue4/0.9.16` | `1cd0f377a0632c788e98dfad4677e4daf8845c08` | 旧版 CARLA 对照线 |
 | `gottaBoy/carla` | `ue58-dev` | `5684efc317185244c6474dfb88d4b3651e2f1924` | UE5.8 后续实验 |
 | `gottaBoy/ros-bridge` | `master` | `e9063d97ff5a724f76adbb1b852dc71da1dcfeec` | CARLA 0.9.13 旧 bridge |
@@ -38,21 +43,40 @@ Server、GPU 渲染或性能通过证据。
 
 ### 3.1 CARLA `ue5-dev`
 
-`ue5-dev` 是当前较新的源码学习入口，包含 native ROS 2 和 `LinuxArm64`
-声明。但现有构建链尚未形成可维护的 DGX ARM64 Server：
+`dgx-arm64` 基于 `ue5-dev`，包含 native ROS 2 和 `LinuxArm64` 声明。本轮已在
+该分支提交初始 ARM64 构建修复，但仍未形成可维护的 DGX ARM64 Server：
 
-- `CMake/Toolchain.cmake` 虽识别 `aarch64`，OpenSSL 路径仍固定为
-  `x86_64-unknown-linux-gnu`。
-- `Util/Docker/Base.Dockerfile` 仍下载 `linux-x86_64` CMake。
-- UBT/UAT 和 CARLA package 逻辑仍有 `Linux`/`Linux_x64` 默认路径。
+- `CMake/Toolchain.cmake` 已将 OpenSSL 路径改为目标 triple，但实际 ARM64
+  Unreal sysroot 和第三方库尚未验证。
+- `Util/Docker/Base.Dockerfile` 已按 Debian 架构选择 CMake 归档，但还需要
+  真实 ARM64 Docker 构建验证。
+- UBT/UAT 已区分 Linux host 脚本和 `LinuxArm64` target，但实际目标构建尚未验证。
 - UE5 HostLinux sysroot、第三方库、DLSS、Shader 和 Vulkan 运行链需要分别验证。
 - `ue5-dev` CI 没有 DGX ARM64 构建矩阵。
+
+需要把 Unreal 的两个概念分开：Epic 文档把 `LinuxARM64` 列为项目目标平台，
+但 Linux 开发要求同时说明其提供、测试的 Linux toolchain 和 libraries 主要是
+`Linux-x86_64`。这证明的是 ARM64 可以作为某些项目的 target，不证明 Unreal
+Editor、HostLinux 工具链或 CARLA Server 已能在 ARM64 Linux host 上原生构建。
+DGX 社区 bring-up 还遇到 UBA、FBX、USD、OpenEXR、ISPC 和平台宏等缺口。
+
+因此本项目的 Unreal Gate 必须拆为：
+
+```text
+UE ARM64 host tools
+  -> UnrealEditor/ShaderCompileWorker
+  -> CarlaUnreal target
+  -> CARLA package/server
+  -> GB10 Vulkan and sensor runtime
+```
+
+其中“LinuxArm64 target 声明存在”只能通过静态检查，不能替代后面的编译和运行证据。
 
 因此状态应记录为：
 
 ```text
 ARM64 Docker 基础环境       可行
-CARLA CMake ARM64 配置      待修复
+CARLA CMake ARM64 配置      初始修复完成，待构建验证
 LibCarla/Python API         待验证
 UE5.5 + CarlaUnreal Server  高风险实验
 GB10 Vulkan/离屏渲染        待验证
