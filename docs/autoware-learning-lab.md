@@ -133,6 +133,248 @@ docker compose --env-file .env -f compose.dgx.yaml \
   bash -lc 'source /opt/ros/humble/setup.bash; ros2 node list; echo "--- topics ---"; ros2 topic list'
 ```
 
+### 4.1 从“执行命令”变成“观察效果”
+
+`inspect-modules` 只回答“ROS 图上有没有这些接口”。真正学习一个模块时，
+继续运行：
+
+```bash
+make learn-module MODULE=localization DURATION=5
+make learn-module MODULE=planning DURATION=5
+make learn-module MODULE=control DURATION=5
+```
+
+命令结束时会打印类似：
+
+```text
+OBSERVED harness test=learning artifacts=artifacts/learning/20260912T080000Z-spark-dba5 detail=...
+```
+
+这就是本次学习结果所在目录。按以下顺序阅读：
+
+```bash
+latest="$(
+  find artifacts/learning -mindepth 1 -maxdepth 1 -type d \
+    | sort | tail -n 1
+)"
+
+# 1. 先看本轮结论和运行状态
+cat "$latest/decision.md"
+
+# 2. 再看提取后的关键指标
+cat "$latest/metrics/"*-summary.txt
+
+# 3. 最后看完整 publisher、subscriber、QoS 和消息摘要
+less "$latest/logs/"*-observation.txt
+```
+
+目录内三个文件的职责不同：
+
+| 文件 | 什么时候看 | 回答的问题 |
+|---|---|---|
+| `decision.md` | 第一眼 | 本轮观察的是哪个模块、是否完成、数据状态是什么 |
+| `metrics/<module>-summary.txt` | 日常学习和前后对比 | 哪些 topic 有数据、频率多少、消息内容有什么 |
+| `logs/<module>-observation.txt` | 深入排障 | 谁发布、谁订阅、QoS 是否兼容、完整观察过程是什么 |
+
+这里使用 `OBSERVED`，而不是 `PASS`。观察到消息只能证明数据链路正在运行，
+不能单独证明算法正确。
+
+`learn-module` 在 Autoware 容器内完成六步观察：
+
+```text
+发现 topic
+  -> 查看发布者和订阅者
+  -> 抓取一条有界消息摘要
+  -> 测量观测频率
+  -> 改变一个输入
+  -> 比较下游输出
+```
+
+先这样解读输出：
+
+| 输出 | 含义 |
+|---|---|
+| `status=MISSING` | 当前 ROS 图没有该接口 |
+| `Publisher count: 0` | 接口可能被发现，但没有节点发布 |
+| `sample_status=NO_MESSAGE` | 观测窗口内没有收到真实消息 |
+| `sample_status=RECEIVED` | 已收到消息，可以开始检查内容 |
+| `message_count` | 窗口内收到的消息数量 |
+| `observed_rate_hz` | 实测发布频率，不是配置文件中的目标值 |
+| `sample_summary` | 首条消息的结构化摘要；大块图像和点云数据只显示长度 |
+| `module_status=TOPICS_PRESENT_NO_MESSAGES` | 有接口，但本次没有采到运行时数据 |
+| `module_status=MESSAGES_RECEIVED` | 至少一个该模块 topic 有真实消息 |
+
+不同消息重点看：
+
+- Camera：`header.stamp`、`frame_id`、`width`、`height`、`encoding`、
+  `step` 和 `data.length`。
+- LiDAR：`header.stamp`、`frame_id`、`width`、`height`、`fields.count`、
+  `point_step`、`row_step` 和 `data.length`。
+- Localization：位置、姿态、线速度、角速度以及 `map`、`odom`、
+  `base_link` 是否属于同一 TF 树。
+- Perception/Fusion：`objects.count`、首个对象的类别、位置、尺寸、速度，
+  并通过 publisher 节点确认它究竟是单传感器结果还是融合结果。
+- Planning：`route` 是否已生成、`trajectory.points.count`、首个轨迹点和
+  速度字段。
+- Control：控制命令中的转向、速度、加速度、制动字段及发布频率。
+
+topic 存在只是接口证据，不是算法通过。一次有效实验至少保存两组输出：
+改变输入前一组，改变输入后一组，然后比较消息数量、频率和内容变化。
+
+### 4.2 当前 DGX 可以立即做的实验
+
+常驻 `planning_simulator` 适合先看定位、规划和控制：
+
+```bash
+# 终端 1
+make up-dgx
+
+# 终端 2
+make learn-module MODULE=localization DURATION=5
+make learn-module MODULE=planning DURATION=5
+make learn-module MODULE=control DURATION=5
+```
+
+这组实验能看到 TF、车辆运动状态、规划接口和控制接口。某个规划 topic
+存在但没有消息时，通常表示路线、初始位姿或车辆状态还没准备好，应结合
+publisher、日志和上游 topic 判断，不能只看名字。
+
+要观察场景输入变化，使用两个终端并在场景仍运行时采样。一次场景先观察
+一个模块，避免示例场景已经结束后才开始采样：
+
+```bash
+# 终端 1
+make scenario-up
+
+# 终端 2，按本轮目标选择一个
+make learn-module MODULE=planning DURATION=8
+before="$(
+  find artifacts/learning -mindepth 1 -maxdepth 1 -type d \
+    | sort | tail -n 1
+)"
+# 或
+make learn-module MODULE=control DURATION=8
+```
+
+先保留一份原始输出。然后把
+`config/scenario/sample-scenario.yaml` 中目标车道 `laneId: '112'` 对应的
+两处目标 `s: 18` 同时改成同一条车道内较近的值，例如 `s: 14`，重新运行
+场景和同一模块：
+
+```bash
+make scenario-up
+make learn-module MODULE=planning DURATION=8
+after="$(
+  find artifacts/learning -mindepth 1 -maxdepth 1 -type d \
+    | sort | tail -n 1
+)"
+diff -u \
+  "$before/metrics/planning-summary.txt" \
+  "$after/metrics/planning-summary.txt"
+```
+
+比较两次 `trajectory.points`、速度字段和 `control_cmd`，这才是在观察
+规划/控制对输入变化的反应。完成实验后恢复场景基线，避免后续结果混用
+不同场景。
+
+当前 `planning_simulator` 和 Scenario baseline 没有真实相机/LiDAR 输入，
+所以：
+
+```bash
+make learn-module MODULE=sensing DURATION=8
+```
+
+预期可能得到：
+
+```text
+module_status=NO_RUNTIME_INPUT
+conclusion=no effect can be observed for this module in the current runtime
+```
+
+这不是 sensing 失败，而是当前 demo 没有传感器数据源。要观察 sensing、
+perception 和 fusion，必须接入 AWSIM/CARLA，或回放包含相机、点云、标定
+和 TF 的 rosbag。
+
+### 4.3 理解概念和逻辑的五层阅读法
+
+不要直接从算法源码开始。每个模块都按下面五层向下学习：
+
+| 层次 | 核心概念 | 在结果里看什么 | 理解标准 |
+|---|---|---|---|
+| 1. ROS 图 | node、topic、publisher、subscriber、message type | `topic info --verbose` | 能说清楚谁产生数据、谁消费数据 |
+| 2. 数据契约 | 字段、单位、时间戳、`frame_id` | `sample_summary` | 能解释主要字段代表的物理意义 |
+| 3. 时空关系 | ROS time、频率、延迟、TF、标定 | `observed_rate_hz`、`header.stamp`、`/tf` | 能判断数据是否在同一时间和坐标系 |
+| 4. 算法因果 | 输入、参数、输出、下游影响 | 修改前后的 summary diff | 能预测改变一个输入后哪些输出应变化 |
+| 5. 工程质量 | 抖动、丢帧、超时、资源、可重复性 | 多轮 artifacts、日志、GPU/CPU 指标 | 能建立阈值并做自动回归 |
+
+最重要的逻辑不是记 topic 名，而是画出模块的因果链：
+
+```text
+传感器消息
+  -> 定位和感知
+  -> 融合后的环境状态
+  -> route / behavior / trajectory
+  -> control command
+  -> 车辆状态变化
+  -> 新一轮传感器消息
+```
+
+排障时反向追踪。例如没有 `control_cmd`：
+
+```text
+control_cmd 没消息
+  <- trajectory 是否有消息
+  <- route 和 ego state 是否准备好
+  <- localization 和 TF 是否连通
+  <- simulator/rosbag 是否真的在发布输入
+```
+
+### 4.4 从入门到精通的学习路线
+
+| 阶段 | 动手内容 | 需要掌握 | 完成标志 |
+|---|---|---|---|
+| 入门 1 | `inspect-modules` | ROS node/topic/type | 能解释 `PRESENT` 和 `MISSING` |
+| 入门 2 | `learn-module` | publisher/subscriber、消息字段、频率 | 能从 artifacts 找到一条真实消息 |
+| 基础 | localization -> planning -> control | TF、位姿、轨迹、控制量 | 能手工画出三个模块的数据链 |
+| 进阶 | 修改 Scenario 单一变量并做 diff | 控制变量、上游/下游、因果关系 | 能解释轨迹或控制为何改变 |
+| 高阶 | rosbag 回放 sensing/perception/fusion | 时间同步、QoS、标定、检测和融合 | 同一 bag 多次运行结果可比较 |
+| 专家 | 调参数、替换节点/模型、建立指标 | 算法原理、延迟预算、故障模式、回归 Gate | 变更有量化指标和自动化证据 |
+
+建议一次只学一个问题：
+
+1. 数据有没有？
+2. 数据是谁产生的？
+3. 字段和坐标系是什么意思？
+4. 频率和时间戳是否合理？
+5. 改一个输入后，哪个下游输出改变？
+6. 改变是否符合算法预期？
+7. 多次运行能否复现？
+
+### 4.5 什么时候使用可视化
+
+终端和 artifacts 用来确认事实，可视化用来建立空间直觉。配置好可选
+Foxglove profile 后执行：
+
+```bash
+make viz
+```
+
+在 Foxglove 客户端中逐步添加：
+
+```text
+/map/vector_map
+/tf 和 /tf_static
+/localization/kinematic_state
+/planning/trajectory
+/perception/object_recognition/objects
+相机 Image
+LiDAR PointCloud2
+/control/command/control_cmd 的 Plot
+```
+
+先只显示地图、TF 和轨迹；确认坐标关系后，再叠加对象、点云和图像。
+画面“看起来正常”仍然要用 artifacts 中的频率、时间戳和发布者信息验证。
+
 ## 5. 先学规划和控制
 
 这是当前 DGX 上最容易复现的模块学习路径。准备并执行固定场景：
@@ -358,8 +600,17 @@ make inspect-modules MODULE=control
 
 ```bash
 # 先把 REPLAY_BAG=/data/bags/<run> 写入 .env
+# 终端 1
 make up-dgx
+
+# 终端 2
 make replay
+
+# 终端 3，在回放期间采样
+make learn-module MODULE=sensing DURATION=10
+make learn-module MODULE=localization DURATION=10
+make learn-module MODULE=perception DURATION=10
+make learn-module MODULE=fusion DURATION=10
 ```
 
 回放期间另开终端：
@@ -398,12 +649,12 @@ Isaac Lab RL -> planning/control policy 训练和动作约束
 
 | 模块 | 先看什么 | 当前入口 | 当前边界 |
 |---|---|---|---|
-| sensing | Image、PointCloud2、时间戳、TF | `make inspect-modules MODULE=sensing` | 需要 AWSIM/CARLA 或带原始传感器话题的 rosbag |
-| localization | `/tf`、`/localization/kinematic_state`、地图坐标 | `make inspect-modules MODULE=localization` | 当前 baseline 是内部运动学输入，真实 NDT/GNSS/IMU 仍需传感器 |
-| perception | 检测、分类、跟踪对象 | `make inspect-modules MODULE=perception`、`ros2 topic echo` | 当前单机场景不提供 AWSIM 相机/LiDAR |
-| fusion | 多传感器同步、标定、关联、融合对象 | `make inspect-modules MODULE=fusion` 加 `topic info --verbose` | 需要锁定 sensor kit 和融合节点 |
-| planning | route、behavior、motion、trajectory | `make scenario`、`make inspect-modules MODULE=planning` | 路线请求和动态障碍要单独构造 |
-| control | trajectory、车辆状态、control command | `make scenario`、`make inspect-modules MODULE=control` | 需要验证命令被仿真车辆消费 |
+| sensing | Image、PointCloud2、时间戳、TF | `make learn-module MODULE=sensing DURATION=8` | 需要 AWSIM/CARLA 或带原始传感器话题的 rosbag |
+| localization | `/tf`、`/localization/kinematic_state`、地图坐标 | `make learn-module MODULE=localization DURATION=5` | 当前 baseline 是内部运动学输入，真实 NDT/GNSS/IMU 仍需传感器 |
+| perception | 检测、分类、跟踪对象 | `make learn-module MODULE=perception DURATION=8` | 当前单机场景不提供 AWSIM 相机/LiDAR |
+| fusion | 多传感器同步、标定、关联、融合对象 | `make learn-module MODULE=fusion DURATION=8` | 需要锁定 sensor kit 和融合节点 |
+| planning | route、behavior、motion、trajectory | `make scenario-up`、`make learn-module MODULE=planning DURATION=8` | 路线请求和动态障碍要单独构造 |
+| control | trajectory、车辆状态、control command | `make scenario-up`、`make learn-module MODULE=control DURATION=8` | 需要验证命令被仿真车辆消费 |
 
 ## 10. 逐级进阶
 

@@ -168,6 +168,11 @@ make inspect-modules
 make inspect-modules MODULE=localization
 make inspect-modules MODULE=planning
 make inspect-modules MODULE=control
+
+# 进一步采样真实消息、发布者和频率
+make learn-module MODULE=localization DURATION=5
+make learn-module MODULE=planning DURATION=5
+make learn-module MODULE=control DURATION=5
 ```
 
 模板中的 `AUTOWARE_COMMAND` 是当前已验证的 sample map、`sample_vehicle`
@@ -177,6 +182,12 @@ make inspect-modules MODULE=control
 `make inspect-modules` 是学习和排障用的 ROS 观察命令，会按模块列出当前发现
 的话题和候选处理节点。它不会把缺失的相机、LiDAR 或融合输出误报为完整
 感知闭环通过。
+
+`make learn-module` 在正在运行的 Autoware 容器中进一步显示发布者/订阅者、
+消息摘要、采样数量和观测频率，并自动保存到
+`artifacts/learning/<UTC时间>-<主机名>/`。先用 `inspect-modules` 找接口，
+再用 `learn-module` 判断接口是否真的有数据；完整实验和结果解释见
+[`docs/autoware-learning-lab.md`](docs/autoware-learning-lab.md)。
 
 ### 3. 启动可选服务
 

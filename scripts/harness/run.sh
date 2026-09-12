@@ -314,6 +314,54 @@ case "${test_id}" in
     finish "PASS" "required ROS topics were discovered before timeout"
     ;;
 
+  learning)
+    require_command docker
+    [[ "${role}" == "dgx" ]] \
+      || finish "BLOCKED" "module learning currently runs from the DGX Compose stack" 2
+
+    module="${2:-}"
+    duration="${3:-5}"
+    case "${module}" in
+      simulation|sensing|localization|perception|fusion|planning|control) ;;
+      *) finish "BLOCKED" "unknown learning module: ${module:-empty}" 2 ;;
+    esac
+    [[ "${duration}" =~ ^[0-9]+([.][0-9]+)?$ ]] \
+      || finish "BLOCKED" "learning duration must be a positive number" 2
+    awk -v duration="${duration}" 'BEGIN { exit !(duration > 0) }' \
+      || finish "BLOCKED" "learning duration must be greater than zero" 2
+
+    container_id="$(
+      docker compose --env-file "${env_file}" -f compose.dgx.yaml \
+        ps -q autoware
+    )"
+    [[ -n "${container_id}" ]] \
+      || finish "BLOCKED" "Autoware is not running; run make up-dgx or make scenario-up first" 2
+
+    observation_file="${artifact_dir}/logs/${module}-observation.txt"
+    summary_file="${artifact_dir}/metrics/${module}-summary.txt"
+    if ! docker compose --env-file "${env_file}" -f compose.dgx.yaml \
+      exec -T autoware \
+      /opt/my-ad/scripts/harness/learn-module.sh "${module}" "${duration}" \
+      | tee "${observation_file}"; then
+      finish "FAIL" "module learning probe failed for ${module}" 1
+    fi
+
+    grep -E \
+      '^(module=|observation_window_sec=|effect_chain=|learning_goal=|--- topic=|meaning=|status=|Publisher count:|Subscription count:|publisher_count=|sample_status=|message_count=|observed_rate_hz=|sample_summary=|present_topic_count=|topics_with_messages=|module_status=|conclusion=|next_step=|warning=)' \
+      "${observation_file}" > "${summary_file}" || true
+
+    module_status="$(
+      sed -n 's/^module_status=//p' "${observation_file}" | tail -n 1
+    )"
+    conclusion="$(
+      sed -n 's/^conclusion=//p' "${observation_file}" | tail -n 1
+    )"
+    [[ -n "${module_status}" ]] \
+      || finish "FAIL" "module learning probe produced no result status for ${module}" 1
+    finish "OBSERVED" \
+      "module=${module} runtime_status=${module_status} ${conclusion:-observation captured}"
+    ;;
+
   compose)
     ARTIFACT_DIR="${artifact_dir}/compose-config" \
       ENV_FILE="${env_file}" \
@@ -329,6 +377,7 @@ Usage:
   scripts/harness/run.sh runtime <compose-service>
   scripts/harness/run.sh ros [topic-file-in-container]
   scripts/harness/run.sh ros /config/harness/required-topics-scenario.txt
+  scripts/harness/run.sh learning <module> [duration-seconds]
 
 Runtime integration and e2e tests require target containers and real ROS
 evidence. This script does not report those stages as PASS without evidence.
