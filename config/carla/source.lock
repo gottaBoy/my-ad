@@ -5,8 +5,14 @@ sources:
     repository: git@github.com:gottaBoy/carla.git
     ref: dgx-arm64
     base_ref: ue5-dev
-    commit: 6afb2094a68939fcc0284c5f1cc42e38f07ab996
+    commit: cc8c7607cff520cda03d09e992c1eea80d2bc90d
     role: CARLA UE5.5 and native ROS 2 source
+  unreal_engine:
+    repository: git@github.com:gottaBoy/UnrealEngine.git
+    ref: dgx-arm64
+    base_ref: ue5-dev-carla
+    commit: 791a451d24179902005b15d1d6af71450ff37637
+    role: CARLA Unreal Engine 5.5 source
   ros_bridge_legacy:
     repository: https://github.com/gottaBoy/ros-bridge.git
     ref: master
@@ -32,8 +38,23 @@ sources:
   nano_ros:
     repository: https://github.com/gottaBoy/nano-ros.git
     ref: main
-    commit: 9a477cc8177d431a1b007768275af89696bb00e28
+    commit: 9a477cc8177d431a1b007768275af8966bf00e28
     role: optional embedded/RTOS ROS 2 client, not the desktop data plane
+  nvidia_skills:
+    repository: https://github.com/NVIDIA/skills.git
+    ref: main
+    commit: 27fa3e16d95f32b55843da712f163754395bd05f
+    role: optional CUDA/GPU/container skill reference
+  jetson_bsp_skills:
+    repository: https://github.com/NVIDIA-AI-IOT/jetson-bsp-skills.git
+    ref: main
+    commit: fdfafef0416be1eb3852b68fc802a9752f33fb28
+    role: optional BSP evidence reference; not executable on DGX
+  jetson_device_skills:
+    repository: https://github.com/NVIDIA-AI-IOT/jetson-device-skills.git
+    ref: main
+    commit: 20137897aef549cc2fa36a18c10e45da94967c3e
+    role: optional device snapshot/benchmark reference; not a Jetson runtime
 
 decisions:
   primary_carla_route: gottaBoy/carla@dgx-arm64
@@ -42,3 +63,5 @@ decisions:
   legacy_bridge_profile: gottaBoy/ros-bridge@master with CARLA 0.9.13 only
   native_ros2_and_legacy_bridge_same_domain: forbidden
   qemu_amd64_as_support_evidence: forbidden
+  jetson_bsp_operations_on_dgx: forbidden
+  jetson_device_runtime_as_dgx_runtime: forbidden

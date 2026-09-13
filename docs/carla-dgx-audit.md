@@ -30,9 +30,10 @@ CARLA UE5.5 的官方 Linux 文档要求 Ubuntu 22.04 或更高版本，并不�
 
 | 仓库 | 分支/版本 | 当前 commit | 作用 |
 |---|---|---|---|
-| `gottaBoy/carla` | `dgx-arm64`（基于 `ue5-dev`） | `6afb2094a68939fcc0284c5f1cc42e38f07ab996` | UE5.5 / native ROS 2 / initial ARM64 patch |
+| `gottaBoy/carla` | `dgx-arm64`（基于 `ue5-dev`） | `cc8c7607cff520cda03d09e992c1eea80d2bc90d` | UE5.5 / native ROS 2 / initial ARM64 patch |
 | `gottaBoy/carla` | `ue4/0.9.16` | `1cd0f377a0632c788e98dfad4677e4daf8845c08` | 旧版 CARLA 对照线 |
 | `gottaBoy/carla` | `ue58-dev` | `5684efc317185244c6474dfb88d4b3651e2f1924` | UE5.8 后续实验 |
+| `gottaBoy/UnrealEngine` | `dgx-arm64`（基于 `ue5-dev-carla`） | `791a451d24179902005b15d1d6af71450ff37637` | CARLA UE5.5 / ARM64 host-tool fixes |
 | `gottaBoy/ros-bridge` | `master` | `e9063d97ff5a724f76adbb1b852dc71da1dcfeec` | CARLA 0.9.13 旧 bridge |
 | `gottaBoy/autoware_carla_bridge` | `main` / v0.12.0 | `d1a135042d88ab72d55ea73b18b65351c81838d6` | Rust `rclrs` + `carla-rust` 适配器 |
 | `gottaBoy/autoware_universe` | `humble` | `02a589200c1af644ca4b4cb3ed98695b4b62118b` | Autoware Humble 源码 |
@@ -143,6 +144,29 @@ CARLA 直接 RPC
 Zephyr、FreeRTOS、NuttX、ThreadX 和 Linux。它适合未来连接嵌入式控制器、
 ECU 或 MCU，不适合替换当前 DGX 上的 desktop ROS 2 Humble、Autoware 或
 `rclrs` bridge。
+
+### 3.6 NVIDIA skills
+
+以下仓库可以作为 Harness 的可选参考，但不是 CARLA/Unreal 的构建依赖：
+
+| 仓库 | 可借用内容 | 当前边界 |
+|---|---|---|
+| `NVIDIA/skills` | CUDA、GPU、容器和性能分析的任务组织方式 | 作为文档/流程参考，不自动安装运行时 |
+| `jetson-bsp-skills` | BSP、镜像、启动和设备证据的组织方式 | DGX Spark 不是 Jetson BSP，禁止刷机和 JetPack 流程 |
+| `jetson-device-skills` | 设备快照、硬件状态和 benchmark 记录方式 | Jetson 专用设备接口不能直接当作 DGX 接口 |
+
+在本项目中，它们只补充以下 Harness 输入：
+
+```text
+GPU/容器能力快照
+显存或统一内存使用
+温度、功耗和频率（如果 DGX 接口提供）
+测试命令、版本、原始日志和结构化摘要
+```
+
+不能因为某个 NVIDIA skill 在 Jetson 上通过，就把 CARLA UE5、GB10 Vulkan、
+ROS 2 或 Autoware 结果标记为通过。DGX 专用检查必须使用本机实际可用的
+`nvidia-smi`、NVML、CUDA、Vulkan 和 Docker CDI 证据。
 
 ## 4. 推荐数据平面
 
