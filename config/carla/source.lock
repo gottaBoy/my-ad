@@ -5,7 +5,7 @@ sources:
     repository: git@github.com:gottaBoy/carla.git
     ref: dgx-arm64
     base_ref: ue5-dev
-    commit: cc8c7607cff520cda03d09e992c1eea80d2bc90d
+    commit: cbfa2aaf9320f84f3712a4ee7340e78cf27f0e53
     role: CARLA UE5.5 and native ROS 2 source
   unreal_engine:
     repository: git@github.com:gottaBoy/UnrealEngine.git
