@@ -3,6 +3,7 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0-jammy AS dotnet-sdk
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 LANGUAGE=C.UTF-8
 
 COPY --from=dotnet-sdk /usr/share/dotnet /usr/share/dotnet
 RUN ln -s /usr/share/dotnet/dotnet /usr/local/bin/dotnet
