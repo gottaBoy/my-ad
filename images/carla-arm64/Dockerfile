@@ -84,6 +84,11 @@ RUN set -eux; \
 ENV PATH=/opt/cmake/bin:$PATH
 
 RUN cmake --version && dotnet --info
+RUN python3 -m venv /opt/carla-python \
+    && /opt/carla-python/bin/python -m pip install --no-cache-dir numpy setuptools wheel build
+ENV PATH=/opt/carla-python/bin:$PATH
+RUN mkdir -p /opt/carla-python/include/aarch64-linux-gnu/python3.10 \
+    && ln -s /usr/include/aarch64-linux-gnu/python3.10/pyconfig.h /opt/carla-python/include/aarch64-linux-gnu/python3.10/pyconfig.h
 
 COPY scripts/carla/g0-probe.sh /usr/local/bin/carla-g0-probe
 RUN chmod 0755 /usr/local/bin/carla-g0-probe

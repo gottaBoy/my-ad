@@ -8,7 +8,7 @@ x-carla-common: &carla-common
   environment: &carla-environment
     CARLA_SOURCE_REPO: ${CARLA_SOURCE_REPO:-git@github.com:gottaBoy/carla.git}
     CARLA_SOURCE_REF: ${CARLA_SOURCE_REF:-dgx-arm64}
-    CARLA_SOURCE_COMMIT: ${CARLA_SOURCE_COMMIT:-cbfa2aaf9320f84f3712a4ee7340e78cf27f0e53}
+    CARLA_SOURCE_COMMIT: ${CARLA_SOURCE_COMMIT:-234caf5f30ab56eacf093e699e5adc1459fe725c}
     CARLA_SOURCE_DIR: /workspace/carla
     CARLA_UE_DIR: /workspace/unreal-engine
     CARLA_UE_REPO: ${CARLA_UE_REPO:-git@github.com:gottaBoy/UnrealEngine.git}
