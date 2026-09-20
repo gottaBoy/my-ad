@@ -13,11 +13,13 @@ ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
+        bison \
         ca-certificates \
         clang \
         curl \
         cmake \
         file \
+        flex \
         git \
         git-lfs \
         gnupg \
@@ -36,6 +38,7 @@ RUN apt-get update \
         lld \
         locales \
         make \
+        m4 \
         ninja-build \
         pkg-config \
         python3 \
@@ -60,6 +63,7 @@ RUN set -eux; \
       clang-18 \
       lld-18 \
       llvm-18 \
+      llvm-18-dev \
       libc++-18-dev \
       libc++abi-18-dev \
       libclang-rt-18-dev; \

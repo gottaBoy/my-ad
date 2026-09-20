@@ -1,0 +1,7 @@
+{
+  "FileVersion": 3,
+  "Modules": [
+    {"Name": "CarlaMeshBridge", "Type": "Program", "LoadingPhase": "Default"},
+    {"Name": "CarlaAssimpMesh", "Type": "Program", "LoadingPhase": "Default"}
+  ]
+}

@@ -1,0 +1,36 @@
+diff --git a/Engine/Source/Runtime/AnimGraphRuntime/Private/BoneControllers/AnimNode_Trail.cpp b/Engine/Source/Runtime/AnimGraphRuntime/Private/BoneControllers/AnimNode_Trail.cpp
+index b4c4619ec..fcc89af36 100644
+--- a/Engine/Source/Runtime/AnimGraphRuntime/Private/BoneControllers/AnimNode_Trail.cpp
++++ b/Engine/Source/Runtime/AnimGraphRuntime/Private/BoneControllers/AnimNode_Trail.cpp
+@@ -506,7 +506,7 @@ void FAnimNode_Trail::Initialize_AnyThread(const FAnimationInitializeContext& Co
+ 	RelaxationSpeedScaleInputProcessor.Reinitialize();
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ void FAnimNode_Trail::EnsureChainSize()
+ {
+ 	if (RotationLimits.Num() != ChainLength)
+@@ -525,5 +525,5 @@ void FAnimNode_Trail::EnsureChainSize()
+ 	}
+ }
+ 
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+diff --git a/Engine/Source/Runtime/AnimGraphRuntime/Public/BoneControllers/AnimNode_Trail.h b/Engine/Source/Runtime/AnimGraphRuntime/Public/BoneControllers/AnimNode_Trail.h
+index 0522cbdc3..ba4db78a7 100644
+--- a/Engine/Source/Runtime/AnimGraphRuntime/Public/BoneControllers/AnimNode_Trail.h
++++ b/Engine/Source/Runtime/AnimGraphRuntime/Public/BoneControllers/AnimNode_Trail.h
+@@ -194,9 +194,9 @@ struct FAnimNode_Trail : public FAnimNode_SkeletalControlBase
+ 
+ 	ANIMGRAPHRUNTIME_API void PostLoad();
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	ANIMGRAPHRUNTIME_API void EnsureChainSize();
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ private:
+ 	// FAnimNode_SkeletalControlBase interface
+ 	ANIMGRAPHRUNTIME_API virtual void InitializeBoneReferences(const FBoneContainer& RequiredBones) override;

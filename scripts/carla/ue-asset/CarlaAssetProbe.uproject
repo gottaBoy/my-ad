@@ -1,0 +1,15 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.5",
+  "Modules": [
+    {
+      "Name": "CarlaAssetProbe",
+      "Type": "Program",
+      "AdditionalDependencies": [
+        "Core",
+        "CoreUObject",
+        "Engine"
+      ]
+    }
+  ]
+}

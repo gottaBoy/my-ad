@@ -1,0 +1,193 @@
+{
+  "schema_version": 1,
+  "kind": "work_plan_not_stage_evidence",
+  "target": "DGX Spark native ARM64 CARLA, sensors and Autoware",
+  "constraints": {
+    "machine": "DGX Spark only",
+    "platform": "linux/arm64",
+    "dependencies_and_runtime_in_docker": true,
+    "external_x86_cook_host": false,
+    "max_parallel_agents": 4,
+    "max_concurrent_ue_builds": 1,
+    "default_build_jobs": 4,
+    "silent_feature_removal": false,
+    "automatic_source_reset_or_push": false
+  },
+  "status_policy": "Planned tasks and passing harness fixtures do not establish product acceptance.",
+  "existing_tools_policy": "These commands are existing helpers, not completion recipes. In particular carla-editor-check uses UBT -SkipBuild, not a real Editor build.",
+  "dependency_policy": "Dependencies gate acceptance and promotion. Disjoint code preparation may overlap; a prerequisite never becomes PASS merely because a dependent task started.",
+  "tasks": [
+    {
+      "id": "R0",
+      "owner": "provenance-agent",
+      "state": "in_progress",
+      "depends_on": [],
+      "title": "Retain the complete local source changes",
+      "write_scope": [
+        "scripts/carla/capture_build_manifest.py",
+        "tests/test_carla_build_manifest.py",
+        "docs/carla-build-manifest.md"
+      ],
+      "acceptance": [
+        "Capture all three repository HEADs and tracked binary patches.",
+        "Retain untracked file content and executable mode, not only hashes.",
+        "Verify both retained snapshots and live inputs; reject missing or changed content.",
+        "Document source.lock drift without silently changing its pins."
+      ],
+      "existing_tools": ["make carla-manifest", "make carla-manifest-verify MANIFEST=<container-path>"],
+      "does_not_prove": ["fresh checkout rebuild", "Editor/Cook", "runtime"]
+    },
+    {
+      "id": "F1",
+      "owner": "fbx-agent",
+      "state": "in_progress",
+      "depends_on": ["R0"],
+      "title": "Finish static Interchange contracts and connect the parser facade",
+      "write_scope": [
+        "scripts/carla/ue-interchange/",
+        "scripts/carla/ue-meshbridge/Source/CarlaUfbxMesh/",
+        "scripts/carla/check_ue_interchange.py",
+        "tests/test_carla_interchange.py",
+        "tests/test_carla_ufbx_scene_gate.py",
+        "docs/carla-interchange.md",
+        "third_party/unreal-engine/Engine/Plugins/Interchange/Runtime/Source/Parsers/Fbx/",
+        "third_party/unreal-engine/Engine/Plugins/Interchange/Runtime/Source/Import/Private/Fbx/",
+        "third_party/unreal-engine/Engine/Source/Programs/InterchangeWorker/"
+      ],
+      "acceptance": [
+        "Run all scene self-checks and export every requested mesh payload.",
+        "Resolve payload keys with transform-aware identity and explicit errors.",
+        "Exercise multiple meshes, hierarchy, instance overrides, mirrored transforms and rejection cases.",
+        "Connect the real parser facade; test worker transport and consumer format separately.",
+        "Keep material shading, animation and export marked incomplete until their own tests pass."
+      ],
+      "existing_tools": ["make carla-interchange JOBS=4", "make carla-interchange-parser JOBS=4", "make carla-interchange-worker JOBS=4", "make carla-ue-ufbxbridge JOBS=4"],
+      "does_not_prove": ["all Legacy FBX consumers migrated", "complete Editor", "Cook"]
+    },
+    {
+      "id": "U1",
+      "owner": "usd-agent",
+      "state": "in_progress",
+      "depends_on": ["R0"],
+      "title": "Rebuild and integrate the pinned USD dependency set",
+      "write_scope": [
+        "scripts/carla/usd/",
+        "scripts/carla/inspect_usd_dependencies.py",
+        "tests/test_carla_usd_dependencies.py",
+        "tests/test_carla_tbb.py",
+        "docs/carla-usd-native.md",
+        "docs/carla-tbb-native.md"
+      ],
+      "acceptance": [
+        "Reduce inventory entries to a component dependency graph; distinguish missing files from selection-rule errors.",
+        "Rebuild pinned native dependencies into separate artifact prefixes.",
+        "Verify architecture, PIC where required, C++ ABI, link/load and Python 3.11 bindings.",
+        "Build OpenUSD 24.05 with the relevant UE patches and validate actual plugin resource loading.",
+        "Submit UE rule changes for main-agent integration without overwriting existing SDK paths."
+      ],
+      "existing_tools": ["make carla-usd-inventory", "make carla-imath JOBS=4", "make carla-alembic JOBS=4 IMATH_REPORT=<verified-report>", "make carla-opensubdiv JOBS=4", "make carla-materialx JOBS=4", "make carla-python JOBS=4", "make carla-boost JOBS=4 PYTHON_REPORT=<report> PYTHON_REPORT_SHA256=<sha256>", "make carla-tbb-static JOBS=4", "make carla-openusd JOBS=4 DEPENDENCIES=<verified-report-map>"],
+      "does_not_prove": ["headers alone are an SDK", "no-usd is full support", "Editor/Cook"]
+    },
+    {
+      "id": "F2",
+      "owner": "fbx-agent",
+      "state": "in_progress",
+      "depends_on": ["F1"],
+      "title": "Migrate reachable Legacy importer/exporter SDK consumers",
+      "write_scope": [
+        "third_party/unreal-engine/Engine/Source/Editor/UnrealEd/",
+        "third_party/unreal-engine/Engine/Source/Editor/MovieSceneTools/",
+        "docs/carla-fbx-migration.md"
+      ],
+      "acceptance": [
+        "Freeze the required CARLA asset/import/reimport/export feature matrix.",
+        "Determine enabled consumers using actual target/build evidence, not lexical counts.",
+        "Replace public SDK-shaped interfaces and update their callers.",
+        "Test required static, material, collision, LOD, skeletal, morph, animation and export workflows.",
+        "Remove SDK build edges only after the relevant implementations and callers are migrated."
+      ],
+      "existing_tools": ["make carla-editor-check", "make carla-legacy-fbx JOBS=4 NATIVE_SDK_ROOT=<verified-sdk>", "make carla-legacy-hierarchy JOBS=4"],
+      "feature_matrix": "config/carla/fbx-feature-matrix.json",
+      "does_not_prove": ["disabled or stubbed functionality has parity"]
+    },
+    {
+      "id": "E1",
+      "owner": "main-agent",
+      "state": "blocked",
+      "depends_on": ["F2", "U1"],
+      "title": "Build and launch the native Editor",
+      "write_scope": ["integration-only"],
+      "acceptance": [
+        "Run a real native Editor build, not only UBT -SkipBuild.",
+        "Launch commandlets and load the CARLA project without unresolved dependencies.",
+        "Record architecture, dynamic libraries, source changes and complete logs."
+      ],
+      "existing_tools": ["make carla-editor-check"],
+      "does_not_prove": ["Cook", "CARLA RPC", "sensors"]
+    },
+    {
+      "id": "C1",
+      "owner": "main-agent",
+      "state": "blocked",
+      "depends_on": ["E1"],
+      "title": "Cook a minimal map and launch a complete native CARLA package",
+      "write_scope": ["integration-only"],
+      "acceptance": [
+        "Cook the LinuxArm64 Game target with matching project assets and Vulkan formats.",
+        "Stage the actual binaries, libraries, Asset Registry, shader data, ICU and content.",
+        "Complete version/world RPC and at least 100 consecutive synchronous ticks.",
+        "Do not replace the rendering-capable Game target with a dedicated non-rendering Server target."
+      ],
+      "existing_tools": ["make carla-runtime-check PROVENANCE=<actual-build> ALLOW_WORLD_MUTATION=1"],
+      "does_not_prove": ["sensor rendering", "Autoware"]
+    },
+    {
+      "id": "S1",
+      "owner": "runtime-agent",
+      "state": "blocked",
+      "depends_on": ["C1"],
+      "title": "Verify UE rendering and real sensor delivery",
+      "write_scope": ["runtime tests and fixtures assigned at activation"],
+      "acceptance": [
+        "Use actual GB10 Vulkan rendering and an inspectable scene.",
+        "Check nonconstant/changing RGB frames and finite nonempty LiDAR data.",
+        "Match frame IDs and simulation timestamps; verify cleanup and stability.",
+        "Choose measured performance thresholds after obtaining the first real sensor baseline."
+      ],
+      "existing_tools": ["make carla-vulkan", "make carla-runtime-check RUNTIME_MODE=sensors PROVENANCE=<actual-build> ALLOW_WORLD_MUTATION=1"],
+      "does_not_prove": ["Vulkan clear/readback alone is CARLA rendering", "ROS/Autoware"]
+    },
+    {
+      "id": "A1",
+      "owner": "runtime-agent",
+      "state": "blocked",
+      "depends_on": ["S1"],
+      "title": "Integrate the bridge and Autoware closed loop",
+      "write_scope": ["bridge and Autoware changes assigned at activation"],
+      "acceptance": [
+        "Verify or port ACB from its 0.9.16 baseline to the actual CARLA 0.10 server.",
+        "Choose one clock/TF/vehicle-control publisher path per profile.",
+        "Validate maps, sensor extrinsics, QoS, localization, planning and vehicle control.",
+        "Complete a repeatable drive-to-goal test with recorded ground truth."
+      ],
+      "existing_tools": [],
+      "does_not_prove": ["a topic list or open port is a closed loop"]
+    },
+    {
+      "id": "R1",
+      "owner": "main-agent",
+      "state": "blocked",
+      "depends_on": ["A1"],
+      "title": "Prove clean rebuild and one-click regression",
+      "write_scope": ["integration-only"],
+      "acceptance": [
+        "Replay the effective source baseline in a separate clean checkout.",
+        "Rebuild the Docker environment and artifacts without hidden local SDK copies.",
+        "Run the product gates again and retain reproducible A/A and A/B evidence.",
+        "Publish one entrypoint only after its whole dependency chain is proven."
+      ],
+      "existing_tools": ["make carla-test", "make carla-manifest"],
+      "does_not_prove": ["a manifest alone is a clean rebuild"]
+    }
+  ]
+}

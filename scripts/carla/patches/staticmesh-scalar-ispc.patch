@@ -1,0 +1,18 @@
+diff --git a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/UEBuildLinux.cs b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/UEBuildLinux.cs
+index d3975ebe2..907a751dc 100644
+--- a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/UEBuildLinux.cs
++++ b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/UEBuildLinux.cs
+@@ -279,7 +279,12 @@ namespace UnrealBuildTool
+ 			// check if OS update invalidated our build
+ 			Target.bCheckSystemHeadersForModification = (BuildHostPlatform.Current.Platform == UnrealTargetPlatform.Linux);
+ 
+-			Target.bCompileISPC = true;
++			string? DisableIspc = Environment.GetEnvironmentVariable("CARLA_DISABLE_ISPC");
++			if (!String.IsNullOrEmpty(DisableIspc) && DisableIspc != "0" && DisableIspc != "1")
++			{
++				throw new BuildException("CARLA_DISABLE_ISPC must be 0 or 1");
++			}
++			Target.bCompileISPC = DisableIspc != "1";
+ 
+ 			if (Target.bIWYU)
+ 			{

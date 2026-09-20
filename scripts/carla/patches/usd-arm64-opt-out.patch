@@ -1,0 +1,21 @@
+diff --git a/Engine/Plugins/Runtime/USDCore/Source/UnrealUSDWrapper/UnrealUSDWrapper.Build.cs b/Engine/Plugins/Runtime/USDCore/Source/UnrealUSDWrapper/UnrealUSDWrapper.Build.cs
+--- a/Engine/Plugins/Runtime/USDCore/Source/UnrealUSDWrapper/UnrealUSDWrapper.Build.cs
++++ b/Engine/Plugins/Runtime/USDCore/Source/UnrealUSDWrapper/UnrealUSDWrapper.Build.cs
+@@ -185,6 +185,17 @@ namespace UnrealBuildTool.Rules
+ 		bool EnableUsdSdk(ReadOnlyTargetRules Target)
+ 		{
++			// Explicit diagnostic profile; keep the normal SDK requirement unchanged.
++			if (Target.Type == TargetType.Editor &&
++				Target.IsInPlatformGroup(UnrealPlatformGroup.Unix) &&
++				Target.Architecture == UnrealArch.Arm64 &&
++				System.Environment.GetEnvironmentVariable("CARLA_UE_DISABLE_USD") == "1")
++			{
++				System.Console.WriteLine("CARLA ARM64 no-usd profile: USD SDK functionality is disabled.");
++				PublicDefinitions.Add("USD_FORCE_DISABLED=1");
++				return false;
++			}
++
+ 			// USD SDK has been built against Python 3 and won't launch if the editor is using Python 2
+ 
+ 			bool bEnableUsdSdk = (
+ 				Target.WindowsPlatform.Compiler != WindowsCompiler.Clang &&

@@ -1,0 +1,37 @@
+diff --git a/Engine/Source/Runtime/Engine/Private/Instances/InstancedPlacementClientInfo.cpp b/Engine/Source/Runtime/Engine/Private/Instances/InstancedPlacementClientInfo.cpp
+index 63b4c4570..f9f7f57c3 100644
+--- a/Engine/Source/Runtime/Engine/Private/Instances/InstancedPlacementClientInfo.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Instances/InstancedPlacementClientInfo.cpp
+@@ -106,6 +106,7 @@ FArchive& operator<<(FArchive& Ar, FClientPlacementInfo& PlacementInfo)
+ 	return Ar;
+ }
+ 
++#if WITH_EDITOR
+ bool FClientPlacementInfo::Initialize(const FGuid& InClientGuid, const FString& InClientDisplayName, AInstancedPlacementPartitionActor* InParentPartitionActor, FClientDescriptorFunc RegisterDescriptorFunc)
+ {
+ 	check(!IsInitialized());
+@@ -146,6 +147,8 @@ void FClientPlacementInfo::Uninitialize()
+ 	ISMDefinition.Empty();
+ }
+ 
++#endif
++
+ void FClientPlacementInfo::PostLoad(AInstancedPlacementPartitionActor* InParentPartitionActor)
+ {
+ #if WITH_EDITORONLY_DATA
+@@ -201,6 +204,7 @@ void FClientPlacementInfo::PostEditUndo()
+ 	InstanceHash.CheckInstanceCount(Instances.Num());
+ }
+ 
++#if WITH_EDITOR
+ TArray<FSMInstanceId> FClientPlacementInfo::AddInstances(TArrayView<const FPlacementInstance> InstancesToAdd)
+ {
+ 	check(IsInitialized());
+@@ -289,6 +293,7 @@ void FClientPlacementInfo::RemoveInstancesFromPartitionActor(TArrayView<const FI
+ 		ParentPartitionActor->UpdateHISMTrees(true, true);
+ 	}
+ }
++#endif
+ 
+ FText FClientPlacementInfo::GetISMPartitionInstanceDisplayName(const FISMClientInstanceId& InstanceId) const
+ {

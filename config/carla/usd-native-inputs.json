@@ -1,0 +1,9 @@
+{
+  "tbb": "/artifacts/carla/usd/tbb-20260915T144340Z-p7WNcW/stage-report.json",
+  "python": "/artifacts/carla/usd/python-20260916T061920Z-6Mp0EP/stage-report.json",
+  "boost": "/artifacts/carla/usd/boost-20260916T070841Z-re7OmX/stage-report.json",
+  "imath": "/artifacts/carla/usd/imath-20260916T021906Z-QilDi2/stage-report.json",
+  "alembic": "/artifacts/carla/usd/alembic-20260916T035401Z-MXwTfh/stage-report.json",
+  "opensubdiv": "/artifacts/carla/usd/opensubdiv-20260916T035401Z-pfVOVc/stage-report.json",
+  "materialx": "/artifacts/carla/usd/materialx-20260916T062752Z-SyErgU/stage-report.json"
+}

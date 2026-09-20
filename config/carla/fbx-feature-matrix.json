@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "kind": "required_workflows_not_acceptance",
+  "review_date": "2026-09-17",
+  "policy": {
+    "silent_feature_removal": false,
+    "fixtures_or_object_compilation_establish_product_acceptance": false,
+    "first_slice": "static asset import and replace/reimport through the real factory",
+    "deferred_features_remain_required": true
+  },
+  "selection_evidence": {
+    "profile": "CarlaUnrealEditor Linux Development -architecture=arm64, explicit FBX headers-only diagnostic",
+    "report": "artifacts/carla/legacy-fbx-3hcme51t/target-summary.json",
+    "direct_fbx_consumers": [
+      "ControlRigEditor", "HairStrandsEditor", "InterchangeFbxParser",
+      "LevelSequenceEditor", "MovieSceneTools", "SequencerScriptingEditor", "UnrealEd"
+    ],
+    "boundary": "Evaluated diagnostic selection, not a successfully linked default Editor or a complete C++ call graph."
+  },
+  "features": [
+    {
+      "id": "static-assets",
+      "product_acceptance": "NOT_RUN",
+      "source_paths": ["third_party/carla/Util/Tools/Import.py", "third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxStaticMeshImport.cpp"],
+      "fixture_paths": ["third_party/unreal-engine/Engine/Content/FbxEditorAutomation/BlenderCube.fbx", "scripts/carla/ufbx-probe/fixtures/multi-mesh.fbx"],
+      "acceptance": ["ImportAssets with FbxFactory creates saved UStaticMesh assets at the requested package paths.", "Verify units, axes, mirrored winding, hierarchy, normals, UVs and separate/combined mesh settings after reload."]
+    },
+    {
+      "id": "materials-textures",
+      "product_acceptance": "NOT_RUN",
+      "source_paths": ["third_party/carla/Util/Tools/Import.py", "third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxMaterialImport.cpp"],
+      "fixture_paths": ["third_party/unreal-engine/Engine/Content/FbxEditorAutomation/MaterialReorder.fbx", "third_party/unreal-engine/Engine/Content/FbxEditorAutomation/MaterialNameClash.FBX", "third_party/unreal-engine/Engine/Content/FbxEditorAutomation/MultiMatId.fbx"],
+      "fixture_gaps": ["External texture and material shading reference scene"],
+      "acceptance": ["Create actual material/texture assets and validate slot identity, instance overrides, UV binding and name conflicts.", "Compare shading and persisted material assignments; material UID nodes alone are insufficient."]
+    },
+    {
+      "id": "collision-sockets",
+      "product_acceptance": "NOT_RUN",
+      "source_paths": ["third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxStaticMeshImport.cpp"],
+      "fixture_paths": [],
+      "fixture_gaps": ["UCX/UBX/USP collision and SOCKET_ hierarchy, including reimport removal"],
+      "acceptance": ["Verify generated/custom collision and socket transforms on the actual UStaticMesh.", "Reimport preserves user-created sockets and removes obsolete imported sockets without corrupting collision."]
+    },
+    {
+      "id": "lods",
+      "product_acceptance": "NOT_RUN",
+      "source_paths": ["third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxStaticMeshImport.cpp"],
+      "fixture_paths": ["third_party/unreal-engine/Engine/Content/FbxEditorAutomation/LOD_StaticMesh.fbx", "third_party/unreal-engine/Engine/Content/FbxEditorAutomation/LodGroupStaticMesh.fbx", "third_party/unreal-engine/Engine/Content/FbxEditorAutomation/ComplexLodSection.fbx"],
+      "acceptance": ["Import and reimport every requested LOD with correct section/material mapping and screen-size settings."]
+    },
+    {
+      "id": "skeletal-animation-morph",
+      "product_acceptance": "NOT_RUN",
+      "source_paths": ["third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxSkeletalMeshImport.cpp", "third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxAnimSequenceImportData.cpp"],
+      "fixture_paths": ["third_party/unreal-engine/Engine/Content/FbxEditorAutomation/SkinBasic.fbx", "third_party/unreal-engine/Engine/Content/FbxEditorAutomation/AnimatedCharacter.fbx", "third_party/unreal-engine/Engine/Content/FbxEditorAutomation/MorphTargets.fbx", "third_party/unreal-engine/Engine/Content/FbxEditorAutomation/CustomCurve_WeightedTangents.fbx"],
+      "acceptance": ["Validate bind poses, skin weights, skeleton identity, sampled animation and morph deltas on actual assets.", "Verify negative/nonzero animation start times, frame rates, curve interpolation and reimport identity."]
+    },
+    {
+      "id": "replace-reimport-tiles",
+      "product_acceptance": "NOT_RUN",
+      "source_paths": ["third_party/carla/Util/Tools/Import.py", "third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Private/Fbx/ReimportFbxSceneFactory.cpp"],
+      "fixture_paths": ["third_party/unreal-engine/Engine/Content/FbxEditorAutomation/Cube_Blue.fbx", "scripts/carla/ufbx-probe/fixtures/hierarchy-geometry.fbx"],
+      "fixture_gaps": ["CARLA tiled map with known origins and adjacent boundaries"],
+      "acceptance": ["Exercise bReplaceExisting, source identity, settings, materials and user-edited asset state across repeated imports.", "Preserve CARLA bForceVerticesRelativeToTile and TileSize behavior, package naming and map placement.", "Malformed input must not partially overwrite an existing asset."]
+    },
+    {
+      "id": "cinematic-export",
+      "product_acceptance": "NOT_RUN",
+      "source_paths": ["third_party/unreal-engine/Engine/Source/Editor/MovieSceneTools/Private/MovieSceneToolHelpers.cpp", "third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxMainExport.cpp"],
+      "fixture_paths": [],
+      "fixture_gaps": ["Saved UE sequence with cameras, lights, skeletal tracks and independent FBX round-trip expectations"],
+      "acceptance": ["Retain the selected ControlRig/Sequencer/LevelSequence/HairStrands consumer workflows.", "Verify exported transforms, cameras, materials, skeletons and animation through an independent reader; object compilation does not establish export parity."]
+    },
+    {
+      "id": "navigation-geometry-conversion",
+      "product_acceptance": "NOT_RUN",
+      "source_paths": ["third_party/carla/Util/Tools/Import.py", "third_party/carla/Util/DockerUtils/fbx/src/FBX2OBJ.cpp"],
+      "fixture_paths": [],
+      "fixture_gaps": ["Road/sidewalk/crosswalk FBX and expected OBJ/navigation geometry"],
+      "acceptance": ["Trace whether the selected map build invokes FBX2OBJ and provide a native replacement when it does.", "Do not classify this CARLA-side SDK consumer as absent merely because it is outside the UE lexical inventory."]
+    }
+  ]
+}

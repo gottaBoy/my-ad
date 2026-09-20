@@ -1,0 +1,59 @@
+diff --git a/Engine/Source/ThirdParty/FBX/2020.2/include/fbxsdk/core/arch/fbxarch.h b/Engine/Source/ThirdParty/FBX/2020.2/include/fbxsdk/core/arch/fbxarch.h
+index c8966ea24..a5dc22405 100644
+--- a/Engine/Source/ThirdParty/FBX/2020.2/include/fbxsdk/core/arch/fbxarch.h
++++ b/Engine/Source/ThirdParty/FBX/2020.2/include/fbxsdk/core/arch/fbxarch.h
+@@ -136,6 +136,9 @@
+     #elif defined(__arm__)
+ 		#define FBXSDK_ARCH_ARM 1
+ 		#define FBXSDK_CPU_32 1
++	#elif defined(__aarch64__)
++		#define FBXSDK_ARCH_ARM 1
++		#define FBXSDK_CPU_64 1
+ 	#elif defined(EMSCRIPTEN)
+   		#define FBXSDK_ARCH_AMD64 1
+ 		#define FBXSDK_CPU_64 1
+diff --git a/Engine/Source/ThirdParty/FBX/FBX.Build.cs b/Engine/Source/ThirdParty/FBX/FBX.Build.cs
+index 806776a15..6df57027a 100644
+--- a/Engine/Source/ThirdParty/FBX/FBX.Build.cs
++++ b/Engine/Source/ThirdParty/FBX/FBX.Build.cs
+@@ -60,7 +60,15 @@ public class FBX : ModuleRules
+ 		else if (Target.IsInPlatformGroup(UnrealPlatformGroup.Unix))
+ 		{
+ 			string FBxDllPath = FBXDLLDir + "Linux/" + Target.Architecture.LinuxName + "/";
+-			if (!Target.bIsEngineInstalled && !Directory.Exists(FBxDllPath))
++			string HeadersOnly = System.Environment.GetEnvironmentVariable("CARLA_ARM64_FBX_HEADERS_ONLY");
++			if (!string.IsNullOrEmpty(HeadersOnly) && HeadersOnly != "0" && HeadersOnly != "1")
++				throw new BuildException("CARLA_ARM64_FBX_HEADERS_ONLY must be 0 or 1");
++			bool bHeadersOnly = HeadersOnly == "1";
++			if (bHeadersOnly && ((Target.Platform != UnrealTargetPlatform.Linux
++				&& Target.Platform != UnrealTargetPlatform.LinuxArm64)
++				|| Target.Architecture != UnrealArch.Arm64 || Target.Type != TargetType.Editor))
++				throw new BuildException("CARLA_ARM64_FBX_HEADERS_ONLY is a Linux ARM64 diagnostic profile only");
++			if (!Target.bIsEngineInstalled && !bHeadersOnly && !Directory.Exists(FBxDllPath))
+ 			{
+ 				string Err = string.Format("FBX SDK not found in {0}", FBxDllPath);
+ 				System.Console.WriteLine(Err);
+@@ -68,15 +76,19 @@ public class FBX : ModuleRules
+ 			}
+ 
+ 			PublicDefinitions.Add("FBXSDK_SHARED");
++			PublicDefinitions.Add("FBXSDK_COMPILER_CLANG");
++
++			if (bHeadersOnly)
++			{
++				// Compile the Legacy FBX call sites without linking the unavailable
++				// Autodesk library. The resulting linker errors are the migration inventory.
++				return;
++			}
+ 
+ 			PublicRuntimeLibraryPaths.Add(FBxDllPath);
+ 			PublicAdditionalLibraries.Add(FBxDllPath + "libfbxsdk.so");
+ 			RuntimeDependencies.Add(FBxDllPath + "libfbxsdk.so");
+ 
+-			/* There is a bug in fbxarch.h where is doesn't do the check
+-			 * for clang under linux */
+-			PublicDefinitions.Add("FBXSDK_COMPILER_CLANG");
+-
+ 			// libfbxsdk has been built against libstdc++ and as such needs this library
+ 			PublicSystemLibraries.Add("stdc++");
+ 

@@ -1,0 +1,133 @@
+diff --git a/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxStaticMeshImport.cpp b/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxStaticMeshImport.cpp
+index 5d024c188..b9fcfbbd5 100644
+--- a/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxStaticMeshImport.cpp
++++ b/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxStaticMeshImport.cpp
+@@ -6,6 +6,7 @@
+ =============================================================================*/
+ 
+ #include "CoreMinimal.h"
++#include "HAL/PlatformFileManager.h"
+ #include "Misc/Guid.h"
+ #include "UObject/Object.h"
+ #include "UObject/GarbageCollection.h"
+diff --git a/Engine/Source/Runtime/Core/Public/Math/UnrealMathFPU.h b/Engine/Source/Runtime/Core/Public/Math/UnrealMathFPU.h
+index 9055e21f2..d5983f324 100644
+--- a/Engine/Source/Runtime/Core/Public/Math/UnrealMathFPU.h
++++ b/Engine/Source/Runtime/Core/Public/Math/UnrealMathFPU.h
+@@ -2243,10 +2243,11 @@ FORCEINLINE VectorRegister4Double VectorStep(const VectorRegister4Double& Vec)
+ * @param Ptr			Unaligned memory pointer to the RGBA16(8 bytes).
+ * @return				VectorRegister with 4 FLOATs loaded from Ptr.
+ */
+-FORCEINLINE VectorRegister4Float VectorLoadURGBA16N(void* Ptr)
++FORCEINLINE VectorRegister4Float VectorLoadURGBA16N(const void* Ptr)
+ {
+ 	float V[4];
+-	uint16* E = (uint16*)Ptr;
++	uint16 E[4];
++	FMemory::Memcpy(E, Ptr, sizeof(E));
+ 
+ 	V[0] = float(E[0]);
+ 	V[1] = float(E[1]);
+@@ -2263,10 +2264,11 @@ FORCEINLINE VectorRegister4Float VectorLoadURGBA16N(void* Ptr)
+ * @param Ptr			Unaligned memory pointer to the RGBA16(8 bytes).
+ * @return				VectorRegister with 4 FLOATs loaded from Ptr.
+ */
+-FORCEINLINE VectorRegister4Float VectorLoadSRGBA16N(void* Ptr)
++FORCEINLINE VectorRegister4Float VectorLoadSRGBA16N(const void* Ptr)
+ {
+ 	float V[4];
+-	int16* E = (int16*)Ptr;
++	int16 E[4];
++	FMemory::Memcpy(E, Ptr, sizeof(E));
+ 
+ 	V[0] = float(E[0]);
+ 	V[1] = float(E[1]);
+@@ -2653,7 +2655,49 @@ FORCEINLINE VectorRegister2Double VectorDoubleLoad(const void* Ptr)
+ #define VectorCastDoubleToInt(Vec)                  VectorInt64Load(Vec.V)
+ #define VectorCastIntToDouble(Vec)                  VectorDoubleLoad(Vec.V)
+ #define VectorShuffleImmediate(Vec, I0, I1, I2, I3) VectorShuffle(Vec, Vec, I3, I2, I1, I0) // ShuffleImmediate shuffle is reversed from our logical shuffle.
+-#define VectorShiftLeftImm(Vec, ImmAmt)             static_assert(false, "Unimplemented") // TODO: implement
+-#define VectorShiftRightImmArithmetic(Vec, ImmAmt)  static_assert(false, "Unimplemented") // TODO: implement
+-#define VectorShiftRightImmLogical(Vec, ImmAmt)		static_assert(false, "Unimplemented") // TODO: implement
++template<int32 ImmAmt>
++FORCEINLINE VectorRegister4Int VectorShiftLeftImmTemplate(const VectorRegister4Int& Vec)
++{
++	static_assert(ImmAmt >= 0, "Shift count must be non-negative");
++	if constexpr (ImmAmt >= 32)
++	{
++		return MakeVectorRegisterInt(0, 0, 0, 0);
++	}
++	else
++	{
++		return MakeVectorRegisterInt(
++			static_cast<int32>(static_cast<uint32>(Vec.V[0]) << ImmAmt),
++			static_cast<int32>(static_cast<uint32>(Vec.V[1]) << ImmAmt),
++			static_cast<int32>(static_cast<uint32>(Vec.V[2]) << ImmAmt),
++			static_cast<int32>(static_cast<uint32>(Vec.V[3]) << ImmAmt));
++	}
++}
++#define VectorShiftLeftImm(Vec, ImmAmt) VectorShiftLeftImmTemplate<ImmAmt>(Vec)
++template<int32 ImmAmt>
++FORCEINLINE VectorRegister4Int VectorShiftRightImmArithmeticTemplate(const VectorRegister4Int& Vec)
++{
++	static_assert(ImmAmt >= 0, "Shift count must be non-negative");
++	// Packed arithmetic shifts saturate to the sign bit at counts of 32 or more.
++	constexpr int32 Shift = ImmAmt < 32 ? ImmAmt : 31;
++	return MakeVectorRegisterInt(Vec.V[0] >> Shift, Vec.V[1] >> Shift, Vec.V[2] >> Shift, Vec.V[3] >> Shift);
++}
++#define VectorShiftRightImmArithmetic(Vec, ImmAmt) VectorShiftRightImmArithmeticTemplate<ImmAmt>(Vec)
++template<int32 ImmAmt>
++FORCEINLINE VectorRegister4Int VectorShiftRightImmLogicalTemplate(const VectorRegister4Int& Vec)
++{
++	static_assert(ImmAmt >= 0, "Shift count must be non-negative");
++	if constexpr (ImmAmt >= 32)
++	{
++		return MakeVectorRegisterInt(0, 0, 0, 0);
++	}
++	else
++	{
++		return MakeVectorRegisterInt(
++			static_cast<int32>(static_cast<uint32>(Vec.V[0]) >> ImmAmt),
++			static_cast<int32>(static_cast<uint32>(Vec.V[1]) >> ImmAmt),
++			static_cast<int32>(static_cast<uint32>(Vec.V[2]) >> ImmAmt),
++			static_cast<int32>(static_cast<uint32>(Vec.V[3]) >> ImmAmt));
++	}
++}
++#define VectorShiftRightImmLogical(Vec, ImmAmt) VectorShiftRightImmLogicalTemplate<ImmAmt>(Vec)
+ #define VectorIntExpandLow16To32(V0)				static_assert(false, "Unimplemented") // TODO: implement
+diff --git a/Engine/Source/Runtime/Experimental/ChaosCore/Public/Chaos/VectorUtility.h b/Engine/Source/Runtime/Experimental/ChaosCore/Public/Chaos/VectorUtility.h
+index ca2118aa4..9554489d8 100644
+--- a/Engine/Source/Runtime/Experimental/ChaosCore/Public/Chaos/VectorUtility.h
++++ b/Engine/Source/Runtime/Experimental/ChaosCore/Public/Chaos/VectorUtility.h
+@@ -79,7 +79,7 @@ FORCEINLINE VectorRegister4Float VectorCast4IntTo4Float(const VectorRegister4Int
+ #elif PLATFORM_ENABLE_VECTORINTRINSICS
+ 	return _mm_castsi128_ps(V);
+ #else
+-	return VectorCastIntToFloat(Vec);
++	return VectorCastIntToFloat(V);
+ #endif
+ }
+ 
+@@ -97,7 +97,7 @@ FORCEINLINE VectorRegister4Int VectorCast4FloatTo4Int(const VectorRegister4Float
+ #elif PLATFORM_ENABLE_VECTORINTRINSICS
+ 	return _mm_castps_si128(V);
+ #else
+-	return VectorCastFloatToInt(Vec);
++	return VectorCastFloatToInt(V);
+ #endif
+ 
+ }
+@@ -144,7 +144,7 @@ FORCEINLINE VectorRegister4Double VectorUnpackLo(const VectorRegister4Double& A,
+ 	return Result;
+ 	#endif
+ #else
+-	return MakeVectorRegisterFloat(A.V[0], B.V[0], A.V[1], B.V[1]);
++	return MakeVectorRegisterDouble(A.V[0], B.V[0], A.V[1], B.V[1]);
+ #endif
+ }
+ 
+@@ -319,4 +319,3 @@ FORCEINLINE VectorRegister4Double VectorBitwiseNotAnd(const VectorRegister4Doubl
+ #endif
+ 	return Result;
+ }
+-

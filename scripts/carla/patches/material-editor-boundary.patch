@@ -1,0 +1,162 @@
+diff --git a/Engine/Source/Runtime/Engine/Classes/Engine/StaticMesh.h b/Engine/Source/Runtime/Engine/Classes/Engine/StaticMesh.h
+index e09b7142f..3512fc7f5 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Engine/StaticMesh.h
++++ b/Engine/Source/Runtime/Engine/Classes/Engine/StaticMesh.h
+@@ -1660,7 +1660,6 @@ public:
+ 	ENGINE_API const FMeshSectionInfoMap& GetSectionInfoMap() const;
+ 	ENGINE_API FMeshSectionInfoMap& GetOriginalSectionInfoMap();
+ 	ENGINE_API const FMeshSectionInfoMap& GetOriginalSectionInfoMap() const;
+-
+ 	ENGINE_API bool IsAsyncTaskComplete() const;
+ 	
+ 	/** Try to cancel any pending async tasks.
+diff --git a/Engine/Source/Runtime/Engine/Private/StaticMesh.cpp b/Engine/Source/Runtime/Engine/Private/StaticMesh.cpp
+index 861258289..1d004584a 100644
+--- a/Engine/Source/Runtime/Engine/Private/StaticMesh.cpp
++++ b/Engine/Source/Runtime/Engine/Private/StaticMesh.cpp
+@@ -2571,6 +2571,7 @@ static float CalculateViewDistance(float MaxDeviation, float AllowedPixelError)
+ 	return ViewDistance;
+ }
+ 
++#if WITH_EDITOR
+ void FStaticMeshRenderData::ResolveSectionInfo(UStaticMesh* Owner)
+ {
+ 	int32 LODIndex = 0;
+@@ -2647,8 +2648,9 @@ void FStaticMeshRenderData::ResolveSectionInfo(UStaticMesh* Owner)
+ 		ScreenSize[LODIndex].Default = 0.0f;
+ 	}
+ }
++#endif // WITH_EDITOR
+ 
+-void FStaticMeshRenderData::SyncUVChannelData(const TArray<FStaticMaterial>& ObjectData)
++ENGINE_API void FStaticMeshRenderData::SyncUVChannelData(const TArray<FStaticMaterial>& ObjectData)
+ {
+ 	TUniquePtr< TArray<FMeshUVChannelInfo> > UpdateData = MakeUnique< TArray<FMeshUVChannelInfo> >();
+ 	UpdateData->Empty(ObjectData.Num());
+@@ -3925,8 +3927,10 @@ UStaticMesh::UStaticMesh(const FObjectInitializer& ObjectInitializer)
+ 	bAutoComputeLODScreenSize=true;
+ 	ImportVersion = EImportStaticMeshVersion::BeforeImportStaticMeshVersionWasAdded;
+ 	NumStreamedLODs.Default = -1;
++#if WITH_EDITOR
+ 	GetHiResSourceModel().StaticMeshDescriptionBulkData = CreateDefaultSubobject<UStaticMeshDescriptionBulkData>(TEXT("HiResMeshDescription"));
+ 	GetHiResSourceModel().StaticMeshDescriptionBulkData->SetFlags(RF_Transactional);
++#endif
+ 	SetLegacyTangentScaling(false);
+ #endif // #if WITH_EDITORONLY_DATA
+ 	SetLightMapResolution(4);
+@@ -5337,7 +5341,7 @@ bool UStaticMesh::IsReadyForFinishDestroy()
+ 
+ int32 UStaticMesh::GetNumSectionsWithCollision() const
+ {
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	int32 NumSectionsWithCollision = 0;
+ 
+ 	if (GetRenderData() && GetRenderData()->LODResources.Num() > 0)
+@@ -6463,10 +6467,15 @@ void UStaticMesh::Serialize(FArchive& Ar)
+ 		SourceFileTimestamp_DEPRECATED = TEXT("");
+ 	}
+ 
++	#if WITH_EDITOR
+ 	if (Ar.IsLoading() && Ar.CustomVer(FRenderingObjectVersion::GUID) < FRenderingObjectVersion::DistanceFieldSelfShadowBias)
+ 	{
+ 		DistanceFieldSelfShadowBias = GetSourceModel(0).BuildSettings.DistanceFieldBias_DEPRECATED * 10.0f;
+ 	}
++#endif
++#endif // WITH_EDITORONLY_DATA
++
++#if WITH_EDITOR
+ 
+ 	if (Ar.IsLoading() && Ar.CustomVer(FRenderingObjectVersion::GUID) < FRenderingObjectVersion::NaniteFallbackTarget)
+ 	{
+@@ -6481,11 +6490,11 @@ void UStaticMesh::Serialize(FArchive& Ar)
+ 	}
+ 
+ 	if (Ar.CustomVer(FEditorObjectVersion::GUID) >= FEditorObjectVersion::RefactorMeshEditorMaterials)
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 	{
+ 		Ar << GetStaticMaterials();
+ 	}
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	else if (Ar.IsLoading())
+ 	{
+ 		TArray<UMaterialInterface*> Unique_Materials_DEPRECATED;
+@@ -6514,7 +6523,7 @@ void UStaticMesh::Serialize(FArchive& Ar)
+ 		Materials_DEPRECATED.Empty();
+ 
+ 	}
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 
+ 
+ #if WITH_EDITOR
+@@ -6553,7 +6562,7 @@ void UStaticMesh::Serialize(FArchive& Ar)
+ 	}
+ #endif // WITH_EDITOR
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	if (Ar.IsLoading() && Ar.CustomVer(FFortniteMainBranchObjectVersion::GUID) < FFortniteMainBranchObjectVersion::FixedTangentTransformForNonuniformBuildScale)
+ 	{
+ 		bool bHasNonUniformSourceModel = false;
+@@ -8171,8 +8180,8 @@ bool UStaticMesh::ContainsPhysicsTriMeshDataCheckComplex(bool bInUseAllTriData,
+ 
+ bool UStaticMesh::SectionHasCollisionEnabled(const FStaticMeshSection& Section, int32 LODIndex, int32 SectionIndex) const
+ {
+-#if WITH_EDITORONLY_DATA
+-	// we can only use GetSectionInfoMap() in WITH_EDITORONLY_DATA mode
++#if WITH_EDITOR
++	// The section info map is only exposed in editor builds.
+ 	return GetSectionInfoMap().Get(LODIndex, SectionIndex).bEnableCollision;
+ #else // #if WITH_EDITORONLY_DATA
+ 	return Section.bEnableCollision;
+@@ -8460,14 +8469,14 @@ void UStaticMesh::EnforceLightmapRestrictions(bool bUseRenderData)
+ 	// Lightmass only supports 4 UVs from Lightmass::MAX_TEXCOORDS
+ 	int32 NumUVs = 4;
+ 
+-#if !WITH_EDITORONLY_DATA
++#if !WITH_EDITOR
+ 	if (!bUseRenderData)
+ 	{
+ 		//The source models are only available in the editor, fallback on the render data.
+ 		UE_ASSET_LOG(LogStaticMesh, Warning, this, TEXT("Trying to enforce lightmap restrictions using the static mesh SourceModels outside of the Editor."))
+ 		bUseRenderData = true;
+ 	}
+-#endif //WITH_EDITORONLY_DATA
++#endif //WITH_EDITOR
+ 
+ 	if (bUseRenderData)
+ 	{
+@@ -8487,7 +8496,7 @@ void UStaticMesh::EnforceLightmapRestrictions(bool bUseRenderData)
+ 			NumUVs = 1;
+ 		}
+ 	}
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	else
+ 	{
+ 		for (int32 LODIndex = 0; LODIndex < GetNumSourceModels(); ++LODIndex)
+diff --git a/Engine/Source/Runtime/Engine/Public/StaticMeshResources.h b/Engine/Source/Runtime/Engine/Public/StaticMeshResources.h
+index 11186cf75..4185f8b09 100644
+--- a/Engine/Source/Runtime/Engine/Public/StaticMeshResources.h
++++ b/Engine/Source/Runtime/Engine/Public/StaticMeshResources.h
+@@ -459,7 +459,7 @@ public:
+ 	uint32 StaticMeshIndexMemory;
+ #endif
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	FByteBulkData BulkData;
+ 
+ 	FString DerivedDataKey;
+@@ -809,7 +809,7 @@ public:
+ 	/** Estimate of compressed size of Nanite streaming data. */
+ 	uint64 EstimatedNaniteStreamingCompressedSize = 0;
+ 
+-	void SyncUVChannelData(const TArray<FStaticMaterial>& ObjectData);
++	ENGINE_API void SyncUVChannelData(const TArray<FStaticMaterial>& ObjectData);
+ 
+ 	/**
+ 	 * Cache derived renderable data for the static mesh with the provided

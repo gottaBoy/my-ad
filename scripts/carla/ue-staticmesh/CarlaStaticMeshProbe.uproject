@@ -1,0 +1,4 @@
+{
+  "FileVersion": 3,
+  "Modules": [{"Name": "CarlaStaticMeshProbe", "Type": "Program", "LoadingPhase": "Default"}]
+}

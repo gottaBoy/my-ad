@@ -29,6 +29,7 @@ for tool in clang clang++; do
 exec "${llvm_bin}/${tool}" \\
   --target=aarch64-unknown-linux-gnueabi \\
   --sysroot="${sysroot}" \\
+  -march=armv8-a+crypto+sha2 \\
   "\$@"
 EOF
   chmod 0755 "${bin_dir}/${tool}"
@@ -43,7 +44,18 @@ for tool in llvm-ar llvm-nm llvm-objcopy llvm-objdump llvm-ranlib llvm-readelf l
   ln -sfn "${native}" "${bin_dir}/${tool}"
 done
 
-printf 'native_llvm_bin=%s\n' "${llvm_bin}"
+for host_tool in dump_syms BreakpadSymbolEncoder; do
+  host_path="${ue_dir}/Engine/Binaries/Linux/${host_tool}"
+  host_backup_dir="${ue_dir}/Engine/Binaries/Linux/carla-arm64-host-backup"
+  mkdir -p "${host_backup_dir}"
+  if [[ -f "${host_path}" ]] && file -L "${host_path}" | grep -Eq "x86-64|Intel 80386"; then
+    mv -f "${host_path}" "${host_backup_dir}/${host_tool}"
+    printf "%s\n" "#!/usr/bin/env bash" "exit 0" > "${host_path}"
+    chmod 0755 "${host_path}"
+  fi
+done
+
+printf "native_llvm_bin=%s\n" "${llvm_bin}"
 printf 'arm64_sysroot=%s\n' "${sysroot}"
 file "${bin_dir}/clang"
 "${bin_dir}/clang" --version

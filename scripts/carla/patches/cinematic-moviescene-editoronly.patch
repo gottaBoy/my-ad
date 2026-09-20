@@ -1,0 +1,91 @@
+diff --git a/Engine/Source/Runtime/CinematicCamera/Private/CineCameraComponent.cpp b/Engine/Source/Runtime/CinematicCamera/Private/CineCameraComponent.cpp
+index df5701d1d..01820f1af 100644
+--- a/Engine/Source/Runtime/CinematicCamera/Private/CineCameraComponent.cpp
++++ b/Engine/Source/Runtime/CinematicCamera/Private/CineCameraComponent.cpp
+@@ -195,7 +195,7 @@ void UCineCameraComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
+ 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+ }
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 
+ void UCineCameraComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+ {
+diff --git a/Engine/Source/Runtime/CinematicCamera/Public/CineCameraComponent.h b/Engine/Source/Runtime/CinematicCamera/Public/CineCameraComponent.h
+index fd6e68c23..1a5be4ab6 100644
+--- a/Engine/Source/Runtime/CinematicCamera/Public/CineCameraComponent.h
++++ b/Engine/Source/Runtime/CinematicCamera/Public/CineCameraComponent.h
+@@ -160,7 +160,7 @@ public:
+ 	UE_DEPRECATED(5.1, "This function has been deprecated, please access the presets via the CineCameraSettings object.")
+ 	static CINEMATICCAMERA_API TArray<FNamedLensPreset> const& GetLensPresets();
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	/** Update the debug focus plane position and orientation. */
+ 	CINEMATICCAMERA_API void UpdateDebugFocusPlane();
+ #endif
+@@ -208,7 +208,10 @@ protected:
+ 	UPROPERTY(transient)
+ 	TObjectPtr<UMaterialInstanceDynamic> DebugFocusPlaneMID;
+ 
++
++#if WITH_EDITOR
+ 	CINEMATICCAMERA_API virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
++#endif
+ 	CINEMATICCAMERA_API virtual void ResetProxyMeshTransform() override;
+ #endif
+ 
+diff --git a/Engine/Source/Runtime/Engine/Classes/Camera/CameraComponent.h b/Engine/Source/Runtime/Engine/Classes/Camera/CameraComponent.h
+index b53ca6047..68193ad89 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Camera/CameraComponent.h
++++ b/Engine/Source/Runtime/Engine/Classes/Camera/CameraComponent.h
+@@ -237,8 +237,10 @@ public:
+ 	// End of USceneComponent interface
+ 
+ 	// UObject interface
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	ENGINE_API virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
++#endif
++#if WITH_EDITORONLY_DATA
+ 	static ENGINE_API void AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector);
+ 	ENGINE_API virtual void PostLoad() override;
+ 	ENGINE_API virtual void Serialize(FArchive& Ar) override;
+diff --git a/Engine/Source/Runtime/MovieScene/Public/Channels/MovieSceneBoolChannel.h b/Engine/Source/Runtime/MovieScene/Public/Channels/MovieSceneBoolChannel.h
+index 9930d8252..cb004abcd 100644
+--- a/Engine/Source/Runtime/MovieScene/Public/Channels/MovieSceneBoolChannel.h
++++ b/Engine/Source/Runtime/MovieScene/Public/Channels/MovieSceneBoolChannel.h
+@@ -192,7 +192,7 @@ struct TStructOpsTypeTraits<FMovieSceneBoolChannel> : public TStructOpsTypeTrait
+ template<>
+ struct TMovieSceneChannelTraits<FMovieSceneBoolChannel> : TMovieSceneChannelTraitsBase<FMovieSceneBoolChannel>
+ {
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 
+ 	/** Bool channels can have external values (ie, they can get their values from external objects for UI purposes) */
+ 	typedef TMovieSceneExternalValue<bool> ExtendedEditorDataType;
+diff --git a/Engine/Source/Runtime/MovieScene/Public/MovieSceneTrack.h b/Engine/Source/Runtime/MovieScene/Public/MovieSceneTrack.h
+index 25b591838..ad8f7184a 100644
+--- a/Engine/Source/Runtime/MovieScene/Public/MovieSceneTrack.h
++++ b/Engine/Source/Runtime/MovieScene/Public/MovieSceneTrack.h
+@@ -501,14 +501,20 @@ public:
+ 	 *
+ 	 * @return Display tooltip text.
+ 	 */
++
++#if WITH_EDITOR
+ 	virtual FText GetDisplayNameToolTipText(const FMovieSceneLabelParams& LabelParams) const { return FText::GetEmpty(); }
++#endif
+ 
+ 	/**
+ 	 * Gets the track label's color.
+ 	 * 
+ 	 * @return Track label color.
+ 	 */
++
++#if WITH_EDITOR
+ 	virtual FSlateColor GetLabelColor(const FMovieSceneLabelParams& LabelParams) const { return FSlateColor::UseForeground(); }
++#endif
+ 
+ 	/**
+ 	 * Get this track's color tint.

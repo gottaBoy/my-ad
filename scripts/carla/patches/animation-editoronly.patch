@@ -1,0 +1,1385 @@
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimBlueprint.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimBlueprint.h
+index cd6afe87b..44bed21db 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimBlueprint.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimBlueprint.h
+@@ -128,6 +128,9 @@ class UAnimBlueprint : public UBlueprint, public IInterface_PreviewMeshProvider
+ 
+ 	ENGINE_API virtual void Serialize(FArchive& Ar) override;
+ 
++	/** Returns the most base anim blueprint for a given blueprint (if it is inherited from another anim blueprint, returning null if only native / non-anim BP classes are it's parent) */
++	static ENGINE_API UAnimBlueprint* FindRootAnimBlueprint(const UAnimBlueprint* DerivedBlueprint);
++
+ #if WITH_EDITOR
+ 
+ 	ENGINE_API virtual UClass* GetBlueprintClass() const override;
+@@ -155,8 +158,6 @@ class UAnimBlueprint : public UBlueprint, public IInterface_PreviewMeshProvider
+ 	// Finds the index of the specified group, or creates a new entry for it (unless the name is NAME_None, which will return INDEX_NONE)
+ 	ENGINE_API int32 FindOrAddGroup(FName GroupName);
+ 
+-	/** Returns the most base anim blueprint for a given blueprint (if it is inherited from another anim blueprint, returning null if only native / non-anim BP classes are it's parent) */
+-	static ENGINE_API UAnimBlueprint* FindRootAnimBlueprint(const UAnimBlueprint* DerivedBlueprint);
+ 
+ 	/** Returns the parent anim blueprint for a given blueprint (if it is inherited from another anim blueprint, returning null if only native / non-anim BP classes are it's parent) */
+ 	static ENGINE_API UAnimBlueprint* GetParentAnimBlueprint(const UAnimBlueprint* DerivedBlueprint);
+@@ -244,7 +245,9 @@ public:
+ 	// Get the default binding type that any new nodes will use when created
+ 	ENGINE_API UClass* GetDefaultBindingClass() const { return DefaultBindingClass; }
+ 
++#if WITH_EDITOR
+ 	virtual void NotifyGraphRenamed(class UEdGraph* Graph, FName OldName, FName NewName) override;
++#endif
+ 
+ 	// Event that is broadcast to inform observers that the node title has changed
+ 	// The default SAnimationGraphNode uses this to invalidate cached node title text
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimComposite.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimComposite.h
+index 0320e84cb..dc23c5c4f 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimComposite.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimComposite.h
+@@ -59,11 +59,14 @@ public:
+ 	//~ End UAnimSequenceBase Interface
+ 	//~ Begin UAnimSequence Interface
+ #if WITH_EDITOR
+-	virtual class UAnimSequence* GetAdditiveBasePose() const override;
+ 	virtual bool GetAllAnimationSequencesReferred(TArray<UAnimationAsset*>& AnimationAssets, bool bRecursive = true) override;
+ 	virtual void ReplaceReferredAnimations(const TMap<UAnimationAsset*, UAnimationAsset*>& ReplacementMap) override;
+ 	virtual void UpdateCommonTargetFrameRate() override;	
+ #endif
++
++#if WITH_EDITORONLY_DATA
++	virtual class UAnimSequence* GetAdditiveBasePose() const override;
++#endif
+ 	//~ End UAnimSequence Interface
+ 
+ 	//~ Begin UAnimCompositeBase Interface
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompositeBase.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompositeBase.h
+index 50b8f875d..4c7d664c9 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompositeBase.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompositeBase.h
+@@ -306,6 +306,9 @@ struct FAnimTrack
+ 	/** Sorts AnimSegments based on the start time of each segment */
+ 	ENGINE_API void SortAnimSegments();
+ 
++#endif
++
++#if WITH_EDITORONLY_DATA
+ 	/** Get Addiitve Base Pose if additive */
+ 	class UAnimSequence* GetAdditiveBasePose() const;
+ #endif
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress.h
+index c4edfe1cd..3cf3a473f 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress.h
+@@ -262,7 +262,7 @@ public:
+ 	friend class UAnimSequence;
+ };
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ namespace UE
+ {
+ 	namespace Anim
+@@ -307,7 +307,7 @@ namespace UE
+ 		}
+ 	}
+ }
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+ 
+ UCLASS(abstract, hidecategories=Object, MinimalAPI, EditInlineNew)
+@@ -346,7 +346,7 @@ public:
+ 	virtual void DecompressBone(FAnimSequenceDecompressionContext& DecompContext, int32 TrackIndex, FTransform& OutAtom) const override;
+ 
+ protected:
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	/**
+ 	 * Implemented by child classes, this function reduces the number of keyframes in
+ 	 * the specified sequence, given the specified skeleton (if needed).
+@@ -354,7 +354,7 @@ protected:
+ 	 * @return		true if the keyframe reduction was successful.
+ 	 */
+ 	virtual bool DoReduction(const FCompressibleAnimData& CompressibleAnimData, FCompressibleAnimDataResult& OutResult) PURE_VIRTUAL(UAnimCompress::DoReduction,return false;);
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+ 	/**
+ 	 * Common compression utility to remove 'redundant' position keys based on the provided delta threshold
+@@ -552,13 +552,13 @@ public:
+ 		const TArray<FScaleTrack>& ScaleData,
+ 		bool IncludeKeyTable = false);
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	UE_DEPRECATED(5.1, "PopulateDDCKeyArchive has been deprecated")
+ 	void PopulateDDCKeyArchive(FArchive& Ar) {}
+ 
+ protected:
+ 	virtual void PopulateDDCKey(const UE::Anim::Compression::FAnimDDCKeyArgs& KeyArgs, FArchive& Ar) override;
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+ 	/**
+ 	 * Utility function to append data to a byte stream.
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_BitwiseCompressOnly.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_BitwiseCompressOnly.h
+index 8bb9e83c2..18409cd67 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_BitwiseCompressOnly.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_BitwiseCompressOnly.h
+@@ -20,9 +20,9 @@ class UAnimCompress_BitwiseCompressOnly : public UAnimCompress
+ 
+ protected:
+ 	//~ Begin UAnimCompress Interface
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	virtual bool DoReduction(const FCompressibleAnimData& CompressibleAnimData, FCompressibleAnimDataResult& OutResult) override;
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 	//~ Begin UAnimCompress Interface
+ };
+ 
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_PerTrackCompression.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_PerTrackCompression.h
+index 73a6b71e4..a1834b598 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_PerTrackCompression.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_PerTrackCompression.h
+@@ -136,12 +136,15 @@ protected:
+ 	//~ Begin UAnimCompress Interface
+ #if WITH_EDITOR
+ 	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
++#endif
++
++#if WITH_EDITORONLY_DATA
+ 	virtual bool DoReduction(const FCompressibleAnimData& CompressibleAnimData, FCompressibleAnimDataResult& OutResult) override;
+ 	virtual void PopulateDDCKey(const UE::Anim::Compression::FAnimDDCKeyArgs& KeyArgs, FArchive& Ar) override;
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 	//~ Begin UAnimCompress Interface
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	//~ Begin UAnimCompress_RemoveLinearKeys Interface
+ 	virtual void CompressUsingUnderlyingCompressor(
+ 		const FCompressibleAnimData& CompressibleAnimData,
+@@ -157,7 +160,7 @@ protected:
+ 		TArray<FRotationTrack>& RotationData,
+ 		TArray<FScaleTrack>& ScaleData) override;
+ 	//~ End UAnimCompress_RemoveLinearKeys Interface
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ };
+ 
+ 
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_RemoveEverySecondKey.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_RemoveEverySecondKey.h
+index 050596c5a..51690b337 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_RemoveEverySecondKey.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_RemoveEverySecondKey.h
+@@ -31,10 +31,11 @@ class UAnimCompress_RemoveEverySecondKey : public UAnimCompress
+ 
+ protected:
+ 	//~ Begin UAnimCompress Interface
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	virtual bool DoReduction(const FCompressibleAnimData& CompressibleAnimData, FCompressibleAnimDataResult& OutResult) override;
++
+ 	virtual void PopulateDDCKey(const UE::Anim::Compression::FAnimDDCKeyArgs& KeyArgs, FArchive& Ar) override;
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 	//~ Begin UAnimCompress Interface
+ };
+ 
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_RemoveLinearKeys.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_RemoveLinearKeys.h
+index 71a2185b4..6fe54ccb4 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_RemoveLinearKeys.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_RemoveLinearKeys.h
+@@ -84,13 +84,14 @@ class UAnimCompress_RemoveLinearKeys : public UAnimCompress
+ 
+ protected:
+ 	//~ Begin UAnimCompress Interface
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	virtual bool DoReduction(const FCompressibleAnimData& CompressibleAnimData, FCompressibleAnimDataResult& OutResult) override;
++
+ 	virtual void PopulateDDCKey(const UE::Anim::Compression::FAnimDDCKeyArgs& KeyArgs, FArchive& Ar) override;
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 	//~ Begin UAnimCompress Interface
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	/**
+ 	 * Pre-filters the tracks before running the main key removal algorithm
+ 	 */
+@@ -210,7 +211,7 @@ protected:
+ 		TArray<FRotationTrack>& RotationTracks, 
+ 		TArray<FScaleTrack>& ScaleTracks);
+ 
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ };
+ 
+ 
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_RemoveTrivialKeys.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_RemoveTrivialKeys.h
+index f1722f18c..07baef2c2 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_RemoveTrivialKeys.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimCompress_RemoveTrivialKeys.h
+@@ -30,10 +30,11 @@ class UAnimCompress_RemoveTrivialKeys : public UAnimCompress
+ 
+ protected:
+ 	//~ Begin UAnimCompress Interface
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	virtual bool DoReduction(const FCompressibleAnimData& CompressibleAnimData, FCompressibleAnimDataResult& OutResult) override;
++
+ 	virtual void PopulateDDCKey(const UE::Anim::Compression::FAnimDDCKeyArgs& KeyArgs, FArchive& Ar) override;
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 	//~ Begin UAnimCompress Interface
+ };
+ 
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimData/AnimDataModel.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimData/AnimDataModel.h
+index 60a809617..834a4759d 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimData/AnimDataModel.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimData/AnimDataModel.h
+@@ -71,7 +71,7 @@ public:
+ 	ENGINE_API virtual UAnimSequence* GetAnimationSequence() const override;
+ 	virtual FAnimDataModelModifiedEvent& GetModifiedEvent() override { return ModifiedEvent; }
+ 	ENGINE_API virtual FGuid GenerateGuid() const override;
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	ENGINE_API virtual void Evaluate(FAnimationPoseData& InOutPoseData, const UE::Anim::DataModel::FEvaluationContext& EvaluationContext) const override;
+ #endif
+ 	ENGINE_API virtual TScriptInterface<IAnimationDataController> GetController() override;
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimData/IAnimationDataModel.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimData/IAnimationDataModel.h
+index fbfe1dce1..8dce882b5 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimData/IAnimationDataModel.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimData/IAnimationDataModel.h
+@@ -351,7 +351,7 @@ public:
+ 	* @param	InOutPoseData		Container for the to-be-evaluated pose related data
+ 	* @param	EvaluationContext	Context describing how the data should be evaluated (timing etc.)
+ 	*/
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	virtual void Evaluate(FAnimationPoseData& InOutPoseData, const UE::Anim::DataModel::FEvaluationContext& EvaluationContext) const = 0;
+ #endif // WITH_EDITOR
+ 
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequence.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequence.h
+index 46b359e01..fcdc1f451 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequence.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequence.h
+@@ -586,14 +586,14 @@ public:
+ 
+ 	/** @return	estimate uncompressed raw size. This is *not* the real raw size. 
+ 				Here we estimate what it would be with no trivial compression. */
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	ENGINE_API int64 GetUncompressedRawSize() const;
+ 
+ 	/**
+ 	 * @return		The approximate size of raw animation data.
+ 	 */
+ 	ENGINE_API int64 GetApproxRawSize() const;
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+ 	/**
+ 	 * @return		The approximate size of compressed animation data for only bones.
+@@ -686,6 +686,7 @@ public:
+ 	 * Create Animation Sequence from the given animation
+ 	 */
+ 	ENGINE_API bool CreateAnimation(class UAnimSequence* Sequence);
++#endif
+ 
+ 	/** 
+ 	 * Add validation check to see if it's being ready to play or not
+@@ -696,7 +697,6 @@ public:
+ 	ENGINE_API uint8* FindSyncMarkerPropertyData(int32 SyncMarkerIndex, FArrayProperty*& ArrayProperty);
+ 
+ 	virtual int32 GetMarkerUpdateCounter() const { return MarkerDataUpdateCounter; }
+-#endif
+ 
+ 	/** Sort the sync markers array by time, earliest first. */
+ 	ENGINE_API void SortSyncMarkers();
+@@ -729,16 +729,6 @@ public:
+ 	ENGINE_API virtual bool GetEnableRootMotionSettingFromMontage() const override;
+ 
+ #if WITH_EDITOR
+-	virtual class UAnimSequence* GetAdditiveBasePose() const override 
+-	{ 
+-		if (IsValidAdditive())
+-		{
+-			return RefPoseSeq;
+-		}
+-
+-		return nullptr;
+-	}
+-
+ 	// Is this animation valid for baking into additive
+ 	ENGINE_API bool CanBakeAdditive() const;
+ 
+@@ -792,10 +782,25 @@ public:
+ 		PRAGMA_ENABLE_DEPRECATION_WARNINGS
+ 	}
+ 
++#endif
++
++#if WITH_EDITORONLY_DATA
+ 	/** Resets Bone Animation, Curve data and Notify tracks **/
+ 	ENGINE_API void ResetAnimation();
+ #endif
+ 
++#if WITH_EDITORONLY_DATA
++	virtual class UAnimSequence* GetAdditiveBasePose() const override
++	{
++		if (IsValidAdditive())
++		{
++			return RefPoseSeq;
++		}
++
++		return nullptr;
++	}
++#endif
++
+ private:
+ 	/**
+ 	* Get Bone Transform of the animation for the Time given, relative to Parent for all RequiredBones
+@@ -896,9 +901,12 @@ protected:
+ 
+ 	ENGINE_API void DeleteBoneAnimationData();
+ 	ENGINE_API void DeleteDeprecatedRawAnimationData();
++#endif // WITH_EDITOR
++
++#if WITH_EDITORONLY_DATA
+ public:
+ 	ENGINE_API void DeleteNotifyTrackData();
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+ protected:
+ 	UPROPERTY(VisibleAnywhere, AssetRegistrySearchable, Category = "Animation")
+@@ -953,9 +961,13 @@ public:
+ 	
+ 	// Synchronous caching of compressed animation data for provided target platform
+ 	ENGINE_API FCompressedAnimSequence& CacheDerivedData(const ITargetPlatform* TargetPlatform);
++#endif // WITH_EDITOR
+ 
++#if WITH_EDITORONLY_DATA
++public:
+ 	ENGINE_API FFrameRate GetTargetSamplingFrameRate(const ITargetPlatform* InPlatform) const;
+-#endif
++protected:
++#endif // WITH_EDITORONLY_DATA
+ 
+ public:
+ 	friend class UAnimationAsset;
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequenceBase.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequenceBase.h
+index e7e2a4e40..b42294f0d 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequenceBase.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequenceBase.h
+@@ -163,19 +163,21 @@ public:
+ 	/** Return rate at which the animation is sampled **/
+ 	ENGINE_API virtual FFrameRate GetSamplingFrameRate() const;
+ 
+-#if WITH_EDITOR
+ 	/** Get the frame number for the provided time */
+ 	ENGINE_API virtual int32 GetFrameAtTime(const float Time) const;
+ 
+ 	/** Get the time at the given frame */
+ 	ENGINE_API virtual float GetTimeAtFrame(const int32 Frame) const;
+-	
++
++#if WITH_EDITORONLY_DATA
+ 	// @todo document
+ 	ENGINE_API void InitializeNotifyTrack();
+ 
+ 	/** Fix up any notifies that are positioned beyond the end of the sequence */
+ 	ENGINE_API void ClampNotifiesAtEndOfSequence();
++#endif
+ 
++#if WITH_EDITOR
+ 	/** Calculates what (if any) offset should be applied to the trigger time of a notify given its display time */ 
+ 	ENGINE_API virtual EAnimEventTriggerOffsets::Type CalculateOffsetForNotify(float NotifyDisplayTime) const;
+ 
+@@ -262,7 +264,6 @@ public:
+ 	virtual void EnableRootMotionSettingFromMontage(bool bInEnableRootMotion, const ERootMotionRootLock::Type InRootMotionRootLock) {};
+ 	virtual bool GetEnableRootMotionSettingFromMontage() const { return false; }
+ 
+-#if WITH_EDITOR
+ private:
+ 	DECLARE_MULTICAST_DELEGATE( FOnNotifyChangedMulticaster );
+ 	FOnNotifyChangedMulticaster OnNotifyChanged;
+@@ -274,14 +275,13 @@ public:
+ 	ENGINE_API void RegisterOnNotifyChanged(const FOnNotifyChanged& Delegate);
+ 	ENGINE_API void UnregisterOnNotifyChanged(void* Unregister);
+ 	virtual bool IsValidToPlay() const { return true; }
+-	// ideally this would be animsequcnebase, but we might have some issue with that. For now, just allow AnimSequence
+-	virtual class UAnimSequence* GetAdditiveBasePose() const { return nullptr; }
+-#endif
+ 
+ 	// return true if anim notify is available 
+ 	ENGINE_API virtual bool IsNotifyAvailable() const;
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
++	// ideally this would be animsequcnebase, but we might have some issue with that. For now, just allow AnimSequence
++	virtual class UAnimSequence* GetAdditiveBasePose() const { return nullptr; }
+ 	ENGINE_API void OnEndLoadPackage(const FEndLoadPackageContext& Context);
+ 	ENGINE_API virtual void OnAnimModelLoaded();
+ public:
+@@ -303,7 +303,6 @@ protected:
+ 
+ 	/** Validates that DataModel contains a valid UAnimDataModel object */
+ 	ENGINE_API void ValidateModel() const;
+-	
+ 	/** Binds to DataModel its modification delegate */
+ 	ENGINE_API void BindToModelModificationEvent();
+ 
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequenceHelpers.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequenceHelpers.h
+index 2e3f93597..04ab002e1 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequenceHelpers.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequenceHelpers.h
+@@ -53,7 +53,9 @@ namespace Anim {
+ 	* @param	RetargetTransforms	Base transforms to use when retargetting the pose
+ 	*/
+ 	ENGINE_API void BuildPoseFromModel(const IAnimationDataModel* Model, FAnimationPoseData& OutPoseData, const double Time, const EAnimInterpolationType& InterpolationType, const FName& RetargetSource, const TArray<FTransform>& RetargetTransforms);
++#endif
+ 
++#if WITH_EDITORONLY_DATA
+ 	/**
+ 	* Populates float curves according to the data stored within a IAnimationDataModel provided a time to sample.
+ 	*
+@@ -62,7 +64,9 @@ namespace Anim {
+ 	* @param	Time				Time value to sample at
+ 	*/
+ 	ENGINE_API void EvaluateFloatCurvesFromModel(const IAnimationDataModel* Model, FBlendedCurve& OutCurves, double Time);
++#endif
+ 
++#if WITH_EDITOR
+ 	/**
+ 	* Populates transform curves according to the data stored within a IAnimationDataModel provided a time to sample.
+ 	*
+@@ -95,7 +99,9 @@ namespace Anim {
+ 	*/
+ 	UE_DEPRECATED(5.2, "GetBoneTransformFromModel with TrackIndex has been deprecated, use IAnimationDataModel::GetBoneTrackTransform instead")
+ 	ENGINE_API void GetBoneTransformFromModel(const IAnimationDataModel* Model, FTransform& OutTransform, int32 TrackIndex, int32 KeyIndex);
++#endif
+ 
++#if WITH_EDITORONLY_DATA
+ 	/**
+ 	* Copies over any individual curve from FRawCurveTracks to a IAnimationDataModel instance targeted by the provided controller.
+ 	*
+@@ -104,7 +110,9 @@ namespace Anim {
+ 	* @param	Controller			Controller to use for adding curve data to a model
+ 	*/
+ 	ENGINE_API void CopyCurveDataToModel(const FRawCurveTracks& CurveData, const USkeleton* Skeleton, IAnimationDataController& Controller);
++#endif
+ 
++#if WITH_EDITOR
+ 	/**
+ 	* Copies over any individual curve from FRawCurveTracks to a IAnimationDataModel instance targeted by the provided controller.
+ 	*
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimStreamable.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimStreamable.h
+index 980cdd4dc..b03c6ac78 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimStreamable.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimStreamable.h
+@@ -152,7 +152,7 @@ public:
+ 
+ 	bool HasRunningPlatformData() const
+ 	{
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 		return RunningAnimPlatformData != nullptr;
+ #else
+ 		return true;
+@@ -161,7 +161,7 @@ public:
+ 
+ 	FStreamableAnimPlatformData& GetRunningPlatformData()
+ 	{
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 		check(RunningAnimPlatformData);
+ 		return *RunningAnimPlatformData;
+ #else
+@@ -171,7 +171,7 @@ public:
+ 
+ 	const FStreamableAnimPlatformData& GetRunningPlatformData() const
+ 	{
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 		check(RunningAnimPlatformData);
+ 		return *RunningAnimPlatformData;
+ #else
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/Skeleton.h b/Engine/Source/Runtime/Engine/Classes/Animation/Skeleton.h
+index 7a109802e..3343a7f79 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/Skeleton.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/Skeleton.h
+@@ -1017,7 +1017,7 @@ protected:
+ 	 */
+ 	bool CreateReferenceSkeletonFromMesh(const USkinnedAsset* InSkinnedAsset, const TArray<int32> & RequiredRefBones);
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	DECLARE_MULTICAST_DELEGATE( FOnSkeletonHierarchyChangedMulticaster );
+ 	FOnSkeletonHierarchyChangedMulticaster OnSkeletonHierarchyChanged;
+ 
+@@ -1041,7 +1041,7 @@ public:
+ 	// Asset registry information for animation sync markers
+ 	ENGINE_API static const FName AnimSyncMarkerTag;
+ 	ENGINE_API static const FString AnimSyncMarkerTagDelimiter;
+-	
++
+ 	// Asset registry information for animation curves
+ 	ENGINE_API static const FName CurveNameTag;
+ 	ENGINE_API static const FString CurveTagDelimiter;
+@@ -1049,10 +1049,10 @@ public:
+ 	// Asset registry information for compatible skeletons
+ 	ENGINE_API static const FName CompatibleSkeletonsNameTag;
+ 	ENGINE_API static const FString CompatibleSkeletonsTagDelimiter;
+-
+ #endif
+ 
+ public:
++
+ 	ENGINE_API USkeletalMeshSocket* FindSocketAndIndex(FName InSocketName, int32& OutIndex) const;
+ 	ENGINE_API USkeletalMeshSocket* FindSocket(FName InSocketName) const;
+ 
+@@ -1086,4 +1086,3 @@ protected:
+ 	friend struct FReferenceSkeletonModifier;
+ 	friend class FEditableSkeleton;
+ };
+-
+diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/VariableFrameStrippingSettings.h b/Engine/Source/Runtime/Engine/Classes/Animation/VariableFrameStrippingSettings.h
+index 1f1cb249e..9eb15bf1d 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Animation/VariableFrameStrippingSettings.h
++++ b/Engine/Source/Runtime/Engine/Classes/Animation/VariableFrameStrippingSettings.h
+@@ -5,7 +5,7 @@
+ #include "UObject/PerPlatformProperties.h"
+ #include "VariableFrameStrippingSettings.generated.h"
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ namespace UE::Anim::Compression { struct FAnimDDCKeyArgs; }
+ #endif
+ /*
+@@ -32,7 +32,7 @@ class UVariableFrameStrippingSettings : public UObject
+ 	FPerPlatformInt FrameStrippingRate;
+ 
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	/** Generates a DDC key that takes into account the current settings, selected codec, input anim sequence and TargetPlatform */
+ 	ENGINE_API void PopulateDDCKey(const UE::Anim::Compression::FAnimDDCKeyArgs& KeyArgs, FArchive& Ar);
+ 
+diff --git a/Engine/Source/Runtime/Engine/Private/AnimBlueprint.cpp b/Engine/Source/Runtime/Engine/Private/AnimBlueprint.cpp
+index dc336f131..99f76f279 100644
+--- a/Engine/Source/Runtime/Engine/Private/AnimBlueprint.cpp
++++ b/Engine/Source/Runtime/Engine/Private/AnimBlueprint.cpp
+@@ -10,8 +10,6 @@
+ #if WITH_EDITOR
+ #include "IAnimationBlueprintEditorModule.h"
+ #include "Settings/AnimBlueprintSettings.h"
+-#endif
+-#if WITH_EDITORONLY_DATA
+ #include "AnimationEditorUtils.h"
+ #endif
+ 
+@@ -22,7 +20,7 @@ UAnimBlueprint::UAnimBlueprint(const FObjectInitializer& ObjectInitializer)
+ 	: Super(ObjectInitializer)
+ {
+ 	bUseMultiThreadedAnimationUpdate = true;
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	bRefreshExtensions = true;
+ #endif
+ 	
+@@ -93,6 +91,9 @@ int32 UAnimBlueprint::FindOrAddGroup(FName GroupName)
+ 	}
+ }
+ 
++#endif
++
++#if WITH_EDITORONLY_DATA
+ UAnimBlueprint* UAnimBlueprint::FindRootAnimBlueprint(const UAnimBlueprint* DerivedBlueprint)
+ {
+ 	UAnimBlueprint* ParentBP = nullptr;
+@@ -109,6 +110,10 @@ UAnimBlueprint* UAnimBlueprint::FindRootAnimBlueprint(const UAnimBlueprint* Deri
+ 	return ParentBP;
+ }
+ 
++#endif
++
++#if WITH_EDITOR
++
+ UAnimBlueprint* UAnimBlueprint::GetParentAnimBlueprint(const UAnimBlueprint* DerivedBlueprint)
+ {
+ 	UAnimBlueprint* ParentBP = nullptr;
+@@ -463,8 +468,10 @@ bool UAnimBlueprint::IsCompatibleByAssetString(const FString& InSkeletonAsset, b
+ 	return (TargetSkeleton != nullptr && TargetSkeleton->IsCompatibleForEditor(InSkeletonAsset));
+ }
+ 
++#if WITH_EDITOR
+ void UAnimBlueprint::NotifyGraphRenamed(class UEdGraph* Graph, FName OldName, FName NewName)
+ {
+ 	OnGraphRenamedEvent().Broadcast(Graph, OldName, NewName);
+ }
++#endif // WITH_EDITOR
+ #endif
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimComposite.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimComposite.cpp
+index fc7c3f4e1..bccc33cf6 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimComposite.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimComposite.cpp
+@@ -135,7 +135,7 @@ FTransform UAnimComposite::ExtractRootTrackTransform(float Time, const FBoneCont
+ 	return {};
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ class UAnimSequence* UAnimComposite::GetAdditiveBasePose() const
+ {
+ 	// @todo : for now it just picks up the first sequence
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompositeBase.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompositeBase.cpp
+index 45c112046..cd5bced5b 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompositeBase.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompositeBase.cpp
+@@ -301,7 +301,7 @@ bool FAnimTrack::HasRootMotion() const
+ 	return false;
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ class UAnimSequence* FAnimTrack::GetAdditiveBasePose() const
+ {
+ 	if (IsAdditive())
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress.cpp
+index 487db40c2..b1bf10b54 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress.cpp
+@@ -16,7 +16,7 @@
+ 
+ DEFINE_LOG_CATEGORY(LogAnimationCompression);
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ namespace UE
+ {
+ 	namespace Anim
+@@ -759,7 +759,7 @@ void UAnimCompress::DecompressBone(FAnimSequenceDecompressionContext& DecompCont
+ 	}
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 
+ void UAnimCompress::PopulateDDCKey(const UE::Anim::Compression::FAnimDDCKeyArgs& KeyArgs, FArchive& Ar)
+ {
+@@ -1188,4 +1188,4 @@ void UAnimCompress::SeparateRawDataIntoTracks(
+ 		OutScaleData.Empty();
+ 	}
+ }
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_BitwiseCompressOnly.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_BitwiseCompressOnly.cpp
+index c457170cd..43efa907b 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_BitwiseCompressOnly.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_BitwiseCompressOnly.cpp
+@@ -15,10 +15,9 @@ UAnimCompress_BitwiseCompressOnly::UAnimCompress_BitwiseCompressOnly(const FObje
+ 	Description = TEXT("Bitwise Compress Only");
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ bool UAnimCompress_BitwiseCompressOnly::DoReduction(const FCompressibleAnimData& CompressibleAnimData, FCompressibleAnimDataResult& OutResult)
+ {
+-#if WITH_EDITORONLY_DATA
+ 	// split the raw data into tracks
+ 	TArray<FTranslationTrack> TranslationData;
+ 	TArray<FRotationTrack> RotationData;
+@@ -49,7 +48,6 @@ bool UAnimCompress_BitwiseCompressOnly::DoReduction(const FCompressibleAnimData&
+ 
+ 	// We could be invalid, set the links again
+ 	AnimationFormat_SetInterfaceLinks(AnimData);
+-#endif // WITH_EDITORONLY_DATA
+ 	return true;
+ }
+ 
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_PerTrackCompression.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_PerTrackCompression.cpp
+index 9fc121d1e..115c5f7f8 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_PerTrackCompression.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_PerTrackCompression.cpp
+@@ -974,7 +974,7 @@ UAnimCompress_PerTrackCompression::UAnimCompress_PerTrackCompression(const FObje
+ 	AllowedScaleFormats.Add(ACF_Fixed48NoW);
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ void UAnimCompress_PerTrackCompression::CompressUsingUnderlyingCompressor(
+ 	const FCompressibleAnimData& CompressibleAnimData,
+ 	FCompressibleAnimDataResult& OutCompressedData,
+@@ -1513,6 +1513,7 @@ void* UAnimCompress_PerTrackCompression::FilterBeforeMainKeyRemoval(
+ 	return Cache;
+ }
+ 
++#if WITH_EDITOR
+ void UAnimCompress_PerTrackCompression::PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent)
+ {
+ 	Super::PostEditChangeProperty(PropertyChangedEvent);
+@@ -1560,6 +1561,7 @@ void UAnimCompress_PerTrackCompression::PostEditChangeProperty(struct FPropertyC
+ 		}
+ 	}
+ }
++#endif
+ 
+ bool UAnimCompress_PerTrackCompression::DoReduction(const FCompressibleAnimData& CompressibleAnimData, FCompressibleAnimDataResult& OutResult)
+ {
+@@ -1625,7 +1627,7 @@ void UAnimCompress_PerTrackCompression::PopulateDDCKey(const UE::Anim::Compressi
+ 					MakeBitForFlag(bUseAdaptiveError2, 3);
+ 	Ar << Flags;
+ }
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+ void UAnimCompress_PerTrackCompression::DecompressBone(FAnimSequenceDecompressionContext& DecompContext, int32 TrackIndex, FTransform& OutAtom) const
+ {
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_RemoveEverySecondKey.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_RemoveEverySecondKey.cpp
+index 0626e7bda..43a03164a 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_RemoveEverySecondKey.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_RemoveEverySecondKey.cpp
+@@ -16,10 +16,9 @@ UAnimCompress_RemoveEverySecondKey::UAnimCompress_RemoveEverySecondKey(const FOb
+ 	MinKeys = 10;
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ bool UAnimCompress_RemoveEverySecondKey::DoReduction(const FCompressibleAnimData& CompressibleAnimData, FCompressibleAnimDataResult& OutResult)
+ {
+-#if WITH_EDITORONLY_DATA
+ 	const int32 StartIndex = bStartAtSecondKey ? 1 : 0;
+ 	const int32 Interval = 2;
+ 
+@@ -56,7 +55,6 @@ bool UAnimCompress_RemoveEverySecondKey::DoReduction(const FCompressibleAnimData
+ 
+ 	// We could be invalid, set the links again
+ 	AnimationFormat_SetInterfaceLinks(AnimData);
+-#endif // WITH_EDITORONLY_DATA
+ 	return true;
+ }
+ 
+@@ -68,5 +66,5 @@ void UAnimCompress_RemoveEverySecondKey::PopulateDDCKey(const UE::Anim::Compress
+ 	Ar << bVal;
+ }
+ 
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_RemoveLinearKeys.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_RemoveLinearKeys.cpp
+index 123bd075a..293b59ef5 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_RemoveLinearKeys.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_RemoveLinearKeys.cpp
+@@ -71,7 +71,7 @@ int64 UAnimCompress_RemoveLinearKeys::EstimateCompressionMemoryUsage(const UAnim
+ }
+ #endif // WITH_EDITORONLY_DATA
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ struct RotationAdapter
+ {
+ 	typedef FQuat4f KeyType;
+@@ -1133,5 +1133,5 @@ void UAnimCompress_RemoveLinearKeys::PopulateDDCKey(const UE::Anim::Compression:
+ 	Ar << Flags;
+ }
+ 
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_RemoveTrivialKeys.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_RemoveTrivialKeys.cpp
+index ef59b0698..c0ce596a6 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_RemoveTrivialKeys.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompress_RemoveTrivialKeys.cpp
+@@ -18,10 +18,9 @@ UAnimCompress_RemoveTrivialKeys::UAnimCompress_RemoveTrivialKeys(const FObjectIn
+ 	MaxScaleDiff = SCALE_ZEROING_THRESHOLD;
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ bool UAnimCompress_RemoveTrivialKeys::DoReduction(const FCompressibleAnimData& CompressibleAnimData, FCompressibleAnimDataResult& OutResult)
+ {
+-#if WITH_EDITORONLY_DATA
+ 	// split the filtered data into tracks
+ 	TArray<FTranslationTrack> TranslationData;
+ 	TArray<FRotationTrack> RotationData;
+@@ -49,7 +48,6 @@ bool UAnimCompress_RemoveTrivialKeys::DoReduction(const FCompressibleAnimData& C
+ 
+ 	// We could be invalid, set the links again
+ 	AnimationFormat_SetInterfaceLinks(AnimData);
+-#endif // WITH_EDITORONLY_DATA
+ 
+ 	return true;
+ }
+@@ -62,5 +60,5 @@ void UAnimCompress_RemoveTrivialKeys::PopulateDDCKey(const UE::Anim::Compression
+ 	Ar << MaxScaleDiff;
+ }
+ 
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompressionTypes.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompressionTypes.cpp
+index dd50481fd..7ead785cc 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimCompressionTypes.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimCompressionTypes.cpp
+@@ -41,7 +41,7 @@ ICompressedAnimData::ICompressedAnimData(const ICompressedAnimData&) = default;
+ ICompressedAnimData& ICompressedAnimData::operator=(const ICompressedAnimData&) = default;
+ PRAGMA_ENABLE_DEPRECATION_WARNINGS
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 
+ PRAGMA_DISABLE_DEPRECATION_WARNINGS
+ FCompressibleAnimData::FCompressibleAnimData(const FCompressibleAnimData&) = default;
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimCurveTypes.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimCurveTypes.cpp
+index cb14f93ab..7566a649f 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimCurveTypes.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimCurveTypes.cpp
+@@ -550,7 +550,9 @@ void FRawCurveTracks::AddFloatCurveKey(const FName& NewCurve, int32 CurveFlags,
+ 
+ 	FloatCurve->UpdateOrAddKey(Value, Time);
+ }
++#endif
+ 
++#if WITH_EDITORONLY_DATA
+ void FRawCurveTracks::RemoveRedundantKeys(float Tolerance /*= UE_SMALL_NUMBER*/, FFrameRate SampleRate /*= FFrameRate(0,0)*/ )
+ {
+ 	for (auto CurveIter = FloatCurves.CreateIterator(); CurveIter; ++CurveIter)
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimDataModel.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimDataModel.cpp
+index 7d24230fc..12cc31c5e 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimDataModel.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimDataModel.cpp
+@@ -13,10 +13,13 @@
+ 
+ #include UE_INLINE_GENERATED_CPP_BY_NAME(AnimDataModel)
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ #include "Animation/AnimSequenceHelpers.h"
+ #include "Animation/AttributesRuntime.h"
+ #include "AnimationRuntime.h"
++#endif
++
++#if WITH_EDITOR
+ #include "AnimEncoding.h"
+ #include "IAnimationDataControllerModule.h"
+ #include "Modules/ModuleManager.h"
+@@ -609,7 +612,7 @@ TScriptInterface<IAnimationDataController> UAnimDataModel::GetController()
+ 	return Controller;
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ FTransform ExtractTransformForKeyIndex(int32 Key, const FRawAnimSequenceTrack& TrackToExtract)
+ {
+ 	static const FVector DefaultScale3D = FVector(1.f);
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimInstanceProxy.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimInstanceProxy.cpp
+index 546465ffa..4a3788830 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimInstanceProxy.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimInstanceProxy.cpp
+@@ -29,7 +29,7 @@
+ #include "Animation/AnimNotifyStateMachineInspectionLibrary.h"
+ #include "Animation/MirrorDataTable.h"
+ #include "Animation/AnimBlueprintGeneratedClass.h"
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ #include "Engine/PoseWatch.h"
+ #endif
+ 
+@@ -3384,7 +3384,7 @@ TArray<FAnimNode_AssetPlayerRelevancyBase*> FAnimInstanceProxy::GetMutableInstan
+ 	return Nodes;
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ void FAnimInstanceProxy::RecordNodeVisit(int32 TargetNodeIndex, int32 SourceNodeIndex, float BlendWeight)
+ {
+ 	UpdatedNodesThisFrame.Emplace(SourceNodeIndex, TargetNodeIndex, BlendWeight);
+@@ -3719,4 +3719,3 @@ TOptional<EAnimInterpolationType> FAnimInstanceProxy::GetInterpolationOverride()
+ }
+ 
+ #undef LOCTEXT_NAMESPACE
+-
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimSequence.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimSequence.cpp
+index 58aa6e63b..3f7025735 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimSequence.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimSequence.cpp
+@@ -517,6 +517,10 @@ void UAnimSequence::ClearAllCachedCookedPlatformData()
+ 	}
+ }
+ 
++#endif // WITH_EDITOR
++
++#if WITH_EDITORONLY_DATA
++
+ int64 UAnimSequence::GetUncompressedRawSize() const
+ {
+ 	if (DataModelInterface.GetObject())
+@@ -557,7 +561,7 @@ int64 UAnimSequence::GetApproxRawSize() const
+ 
+ 	return 0;
+ }
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+ int32 UAnimSequence::GetApproxBoneCompressedSize() const
+ {
+@@ -801,13 +805,13 @@ void UAnimSequence::Serialize(FArchive& Ar)
+ #endif // WITH_EDITORONLY_DATA
+ }
+ 
+-#if WITH_EDITOR
+ bool UAnimSequence::IsValidToPlay() const
+ {
+ 	// make sure sequence length is valid and raw animation data exists, and compressed
+ 	return (GetPlayLength() > 0.f);
+ }
+ 
++#if WITH_EDITORONLY_DATA
+ void UAnimSequence::UpdateFrameRate()
+ {
+ 	PRAGMA_DISABLE_DEPRECATION_WARNINGS
+@@ -2223,7 +2227,7 @@ void UAnimSequence::UpdateDependentStreamingAnimations() const
+ 
+ #endif
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ void UAnimSequence::ResetAnimation()
+ {
+ 	// clear everything. Making new animation, so need to reset all the things that belong here
+@@ -2243,14 +2247,7 @@ void UAnimSequence::ResetAnimation()
+ 	UniqueMarkerNames.Empty();
+ 	AnimNotifyTracks.Empty();
+ }
+-
+-void UAnimSequence::DeleteDeprecatedRawAnimationData()
+-{
+-	PRAGMA_DISABLE_DEPRECATION_WARNINGS
+-	RawAnimationData.Empty();
+-	SourceRawAnimationData_DEPRECATED.Empty();
+-	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+-}
++#endif
+ 
+ void UAnimSequence::DeleteNotifyTrackData()
+ {
+@@ -2262,12 +2259,21 @@ void UAnimSequence::DeleteNotifyTrackData()
+ 	InitializeNotifyTrack();
+ }
+ 
++#if WITH_EDITOR
++void UAnimSequence::DeleteDeprecatedRawAnimationData()
++{
++	PRAGMA_DISABLE_DEPRECATION_WARNINGS
++	RawAnimationData.Empty();
++	SourceRawAnimationData_DEPRECATED.Empty();
++	PRAGMA_ENABLE_DEPRECATION_WARNINGS
++}
++
+ void UAnimSequence::DeleteBoneAnimationData()
+ {
+ 	ValidateModel();
+ 	Controller->RemoveAllBoneTracks();
+ }
+-#endif // WITH_EDITOR
++#endif
+ 
+ bool UAnimSequence::IsValidAdditive() const		
+ { 
+@@ -5114,4 +5120,3 @@ void GatherAnimSequenceStats(FOutputDevice& Ar)
+ 
+ 
+ #undef LOCTEXT_NAMESPACE 
+-
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceBase.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceBase.cpp
+index 7f355203c..4bd3062dc 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceBase.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceBase.cpp
+@@ -233,11 +233,13 @@ void UAnimSequenceBase::PostLoad()
+ 	RefreshCacheData();
+ 
+ #if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	if (!GetPackage()->GetHasBeenEndLoaded())
+ 	{
+ 		FCoreUObjectDelegates::OnEndLoadPackage.AddUObject(this, &UAnimSequenceBase::OnEndLoadPackage);
+ 	}
+ 	else
++#endif
+ 	{
+ 		OnAnimModelLoaded();
+ 	}
+@@ -825,7 +827,7 @@ FFrameRate UAnimSequenceBase::GetSamplingFrameRate() const
+ 	return DefaultFrameRate;
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ void UAnimSequenceBase::InitializeNotifyTrack()
+ {
+ 	if ( AnimNotifyTracks.Num() == 0 ) 
+@@ -833,6 +835,7 @@ void UAnimSequenceBase::InitializeNotifyTrack()
+ 		AnimNotifyTracks.Add(FAnimNotifyTrack(TEXT("1"), FLinearColor::White ));
+ 	}
+ }
++#endif
+ 
+ int32 UAnimSequenceBase::GetFrameAtTime(const float Time) const
+ {
+@@ -853,6 +856,8 @@ void UAnimSequenceBase::UnregisterOnNotifyChanged(void* Unregister)
+ 	OnNotifyChanged.RemoveAll(Unregister);
+ }
+ 
++#if WITH_EDITORONLY_DATA
++
+ void UAnimSequenceBase::ClampNotifiesAtEndOfSequence()
+ {
+ 	const float NotifyClampTime = GetPlayLength();
+@@ -865,6 +870,9 @@ void UAnimSequenceBase::ClampNotifiesAtEndOfSequence()
+ 		}
+ 	}
+ }
++#endif
++
++#if WITH_EDITOR
+ 
+ EAnimEventTriggerOffsets::Type UAnimSequenceBase::CalculateOffsetForNotify(float NotifyDisplayTime) const
+ {
+@@ -1126,7 +1134,7 @@ void UAnimSequenceBase::HandleAssetPlayerTickedInternal(FAnimAssetTickContext &C
+ 	NotifyQueue.AddAnimNotifies(Context.ShouldGenerateNotifies(), NotifyContext.ActiveNotifies, Instance.EffectiveBlendWeight);
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ void UAnimSequenceBase::OnModelModified(const EAnimDataModelNotifyType& NotifyType, IAnimationDataModel* Model, const FAnimDataModelNotifPayload& Payload)
+ {
+ 	NotifyCollector.Handle(NotifyType);
+@@ -1439,12 +1447,13 @@ void UAnimSequenceBase::PopulateModel()
+ 	const FRawCurveTracks CurveData = RawCurveData;
+ 	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+ 		
+-	IAnimationDataController::FScopedBracket ScopedBracket(Controller, LOCTEXT("UAnimSequenceBase::PopulateModel_Bracket", "Generating Animation Model Data for Animation Sequence Base"));
++	Controller->OpenBracket(LOCTEXT("UAnimSequenceBase::PopulateModel_Bracket", "Generating Animation Model Data for Animation Sequence Base"));
+ 	Controller->SetFrameRate(FrameRate);
+ 	Controller->SetNumberOfFrames(Controller->ConvertSecondsToFrameNumber(PlayLength));
+ 
+ 	USkeleton* TargetSkeleton = GetSkeleton();	
+-	UE::Anim::CopyCurveDataToModel(CurveData, TargetSkeleton,  *Controller);	
++	UE::Anim::CopyCurveDataToModel(CurveData, TargetSkeleton,  *Controller);
++	Controller->CloseBracket();
+ }
+ 
+ void UAnimSequenceBase::PopulateWithExistingModel(TScriptInterface<IAnimationDataModel> ExistingDataModel)
+@@ -1540,4 +1549,4 @@ void UAnimSequenceBase::OnAnimModelLoaded()
+ 		}
+ 	}
+ }
+-#endif // WITH_EDITOR
+\ No newline at end of file
++#endif // WITH_EDITOR
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceHelpers.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceHelpers.cpp
+index 01a396894..70d465100 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceHelpers.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceHelpers.cpp
+@@ -74,6 +74,9 @@ void EvaluateFloatCurvesFromModel(const IAnimationDataModel* Model, FBlendedCurv
+ 	UE::Anim::FCurveUtils::BuildUnsorted(OutCurves, NumCurves, GetNameFromIndex, GetValueFromIndex, OutCurves.GetFilter());
+ }
+ 
++#endif
++
++#if WITH_EDITOR
+ void EvaluateTransformCurvesFromModel(const IAnimationDataModel* Model, TMap<FName, FTransform>& OutCurves, double Time, float BlendWeight)
+ {
+ 	if (Model)
+@@ -122,6 +125,7 @@ void GetBoneTransformFromModel(const IAnimationDataModel* Model, FTransform& Out
+ 	}
+ }
+ 
++#if WITH_EDITORONLY_DATA
+ void CopyCurveDataToModel(const FRawCurveTracks& CurveData, const USkeleton* Skeleton, IAnimationDataController& Controller)
+ {
+ 	// Populate float curve data
+@@ -165,6 +169,7 @@ void CopyCurveDataToModel(const FRawCurveTracks& CurveData, const USkeleton* Ske
+ 		}
+ 	}
+ }
++#endif // WITH_EDITORONLY_DATA
+ #endif // WITH_EDITOR
+  
+  
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimStreamable.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimStreamable.cpp
+index b823474d8..9b1c33e49 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimStreamable.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimStreamable.cpp
+@@ -829,6 +829,6 @@ FStreamableAnimPlatformData& UAnimStreamable::GetStreamingAnimPlatformData(const
+ 	checkf(*Data, TEXT("StreamableAnimPlatformData contains nullptr!"));
+ 	return **Data;
+ #else
+-	return RunningAnimPlatformData;
++	return *RunningAnimPlatformData;
+ #endif
+ }
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimationUtils.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimationUtils.cpp
+index aff655cab..6240706ee 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimationUtils.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimationUtils.cpp
+@@ -217,7 +217,7 @@ int32 FAnimationUtils::GetAnimTrackIndexForSkeletonBone(const int32 InSkeletonBo
+ 	});
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ /**
+  * Utility function to measure the accuracy of a compressed animation. Each end-effector is checked for 
+  * world-space movement as a result of compression.
+@@ -519,7 +519,7 @@ FString FAnimationUtils::GetAnimationKeyFormatString(AnimationKeyFormat InFormat
+  * @param TrackHeights [OUT]	The computed track heights
+  *
+  */
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ void FAnimationUtils::CalculateTrackHeights(const FCompressibleAnimData& CompressibleAnimData, int32 NumTracks, TArray<int32>& TrackHeights)
+ {
+ 	TrackHeights.Empty();
+@@ -554,7 +554,7 @@ void FAnimationUtils::CalculateTrackHeights(const FCompressibleAnimData& Compres
+ 		}
+ 	}
+ }
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+ /**
+  * Checks a set of key times to see if the spacing is uniform or non-uniform.
+@@ -638,7 +638,7 @@ struct FBoneTestItem
+ 	{}
+ };
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ template<int32 PERTURBATION_ERROR_MODE>
+ void CalcErrorsLoop(const TArray<FBoneTestItem>& BonesToTest, const FCompressibleAnimData& CompressibleAnimData, const TArray<FTransform>& RawAtoms, const TArray<FTransform>& RawTransforms, TArray<FTransform>& NewTransforms, FAnimPerturbationError& ThisBoneError)
+ {
+@@ -841,7 +841,7 @@ void FAnimationUtils::TallyErrorsFromPerturbation(
+ 		Error.MaxErrorInScaleDueToScale = FMath::Sqrt(Error.MaxErrorInScaleDueToScale);*/
+ 	}
+ }
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+ static UAnimBoneCompressionSettings* DefaultBoneCompressionSettings = nullptr;
+ static UAnimBoneCompressionSettings* DefaultRecorderBoneCompressionSettings = nullptr;
+@@ -1101,7 +1101,7 @@ void FAnimationUtils::ExtractTransformFromTrack(const FRawAnimSequenceTrack& Raw
+ 	OutAtom.NormalizeRotation();
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ void FAnimationUtils::ExtractTransformFromCompressionData(const FCompressibleAnimData& CompressibleAnimData, FCompressibleAnimDataResult& CompressedAnimData, float Time, int32 TrackIndex, bool bUseRawData, FTransform& OutBoneTransform)
+ {
+ 	ExtractTransformFromCompressionData(CompressibleAnimData, CompressedAnimData, (double)Time, TrackIndex, bUseRawData, OutBoneTransform);
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AttributesRuntime.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AttributesRuntime.cpp
+index b59f231f0..2a5845784 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AttributesRuntime.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AttributesRuntime.cpp
+@@ -15,7 +15,7 @@
+ 
+ namespace UE { namespace Anim {
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ void Attributes::GetAttributeValue(FStackAttributeContainer& OutAttributes, const FCompactPoseBoneIndex& PoseBoneIndex, const FAnimatedBoneAttribute& Attribute, const FAnimExtractContext& ExtractionContext)
+ {
+ 	GetAttributeValue(OutAttributes, PoseBoneIndex, Attribute, ExtractionContext.CurrentTime);
+@@ -31,7 +31,7 @@ void Attributes::GetAttributeValue(FStackAttributeContainer& OutAttributes, cons
+ 		Attribute.Curve.EvaluateToPtr(Attribute.Identifier.GetType(), CurrentTime, AttributeDataPtr);
+ 	}
+ }
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+ void Attributes::BlendAttributes(const TArrayView<const FStackAttributeContainer> SourceAttributes, const TArrayView<const float> SourceWeights, FStackAttributeContainer& OutAttributes)
+ {
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/PoseAsset.cpp b/Engine/Source/Runtime/Engine/Private/Animation/PoseAsset.cpp
+index 48ad9c7c7..adad93942 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/PoseAsset.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/PoseAsset.cpp
+@@ -882,7 +882,7 @@ void UPoseAsset::PostLoad()
+ {
+ 	Super::PostLoad();
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	// moved to PostLoad because Skeleton is not completely loaded when we do this in Serialize
+ 	// and we need Skeleton
+ 	if (GetLinkerCustomVersion(FFrameworkObjectVersion::GUID) < FFrameworkObjectVersion::PoseAssetSupportPerBoneMask && GetLinkerCustomVersion(FAnimPhysObjectVersion::GUID) >= FAnimPhysObjectVersion::SaveEditorOnlyFullPoseForPoseAsset)
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/Skeleton.cpp b/Engine/Source/Runtime/Engine/Private/Animation/Skeleton.cpp
+index 5c31c962b..42bdfbc73 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/Skeleton.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/Skeleton.cpp
+@@ -41,7 +41,7 @@ TArray<uint16> USkeleton::DefaultCurveUIDList;
+ FSmartNameMapping* USkeleton::AnimCurveMapping = nullptr;
+ PRAGMA_ENABLE_DEPRECATION_WARNINGS
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ const FName USkeleton::AnimNotifyTag = FName(TEXT("AnimNotifyList"));
+ const FString USkeleton::AnimNotifyTagDelimiter = TEXT(";");
+ 
+@@ -53,7 +53,7 @@ const FString USkeleton::CurveTagDelimiter = TEXT(";");
+ 
+ const FName USkeleton::CompatibleSkeletonsNameTag = FName(TEXT("CompatibleSkeletonList"));
+ const FString USkeleton::CompatibleSkeletonsTagDelimiter = TEXT(";");
+-#endif 
++#endif
+ 
+ #if WITH_EDITORONLY_DATA
+ FAreAllSkeletonsCompatible USkeleton::AreAllSkeletonsCompatibleDelegate;
+@@ -2363,4 +2363,3 @@ UAnimCurveMetaData* USkeleton::GetOrCreateCurveMetaDataObject()
+ }
+ 
+ #undef LOCTEXT_NAMESPACE 
+-
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/SkinWeightProfile.cpp b/Engine/Source/Runtime/Engine/Private/Animation/SkinWeightProfile.cpp
+index 09ddd47bf..5b72e312d 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/SkinWeightProfile.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/SkinWeightProfile.cpp
+@@ -175,7 +175,7 @@ FArchive& operator<<(FArchive& Ar, FRuntimeSkinWeightProfileData::FSkinWeightOve
+ 	return Ar;
+ }
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ FArchive& operator<<(FArchive& Ar, FImportedSkinWeightProfileData& ProfileData)
+ {
+ 	Ar << ProfileData.SkinWeights;
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/VariableFrameStrippingSettings.cpp b/Engine/Source/Runtime/Engine/Private/Animation/VariableFrameStrippingSettings.cpp
+index 1198a2f82..d9e4d46cc 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/VariableFrameStrippingSettings.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/VariableFrameStrippingSettings.cpp
+@@ -14,7 +14,7 @@ UVariableFrameStrippingSettings::UVariableFrameStrippingSettings(const FObjectIn
+ 	FrameStrippingRate = 3;//default Value Set to 3 as 1 is no stripping and 2 is default stripping 3 is the lowest number with an additional effect. 
+ }
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ /** Generates a DDC key that takes into account the current settings, selected codec, input anim sequence and TargetPlatform */
+ void UVariableFrameStrippingSettings::PopulateDDCKey(const UE::Anim::Compression::FAnimDDCKeyArgs& KeyArgs, FArchive& Ar)
+ {
+diff --git a/Engine/Source/Runtime/Engine/Private/WorldSettings.cpp b/Engine/Source/Runtime/Engine/Private/WorldSettings.cpp
+index 912577710..9a515f7a5 100644
+--- a/Engine/Source/Runtime/Engine/Private/WorldSettings.cpp
++++ b/Engine/Source/Runtime/Engine/Private/WorldSettings.cpp
+@@ -31,13 +31,15 @@
+ #include "Materials/Material.h"
+ #include "ComponentRecreateRenderStateContext.h"
+ 
++#if WITH_EDITORONLY_DATA
++#include "HLOD/HLODSetup.h"
++#endif
++
+ #if WITH_EDITOR
+ #include "Editor.h"
+ #include "Misc/TransactionObjectEvent.h"
+-#include "HierarchicalLOD.h"
+-#include "HLOD/HLODSetup.h"
+ #include "WorldPartition/DataLayer/DataLayerManager.h"
+-#endif 
++#endif
+ 
+ #define LOCTEXT_NAMESPACE "ErrorChecking"
+ 
+@@ -421,10 +423,12 @@ PRAGMA_DISABLE_DEPRECATION_WARNINGS
+ 
+ 		if (Ar.CustomVer(FWorldSettingCustomVersion::GUID) < FWorldSettingCustomVersion::DeprecatedEnableHierarchicalLODSystem)
+ 		{
++#if WITH_EDITOR
+ 			if (!bEnableHierarchicalLODSystem_DEPRECATED)
+ 			{
+ 				ResetHierarchicalLODSetup();
+ 			}
++#endif
+ 		}
+ 	}
+ PRAGMA_ENABLE_DEPRECATION_WARNINGS
+diff --git a/Engine/Source/Runtime/Engine/Public/Animation/AnimCompressionTypes.h b/Engine/Source/Runtime/Engine/Public/Animation/AnimCompressionTypes.h
+index b604d8d38..598c59a3d 100644
+--- a/Engine/Source/Runtime/Engine/Public/Animation/AnimCompressionTypes.h
++++ b/Engine/Source/Runtime/Engine/Public/Animation/AnimCompressionTypes.h
+@@ -197,7 +197,7 @@ public:
+ 	}
+ };
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ struct FCompressibleAnimData
+ {
+ public:
+diff --git a/Engine/Source/Runtime/Engine/Public/Animation/AnimCurveTypes.h b/Engine/Source/Runtime/Engine/Public/Animation/AnimCurveTypes.h
+index 9899f0ef3..ed9e08c6f 100644
+--- a/Engine/Source/Runtime/Engine/Public/Animation/AnimCurveTypes.h
++++ b/Engine/Source/Runtime/Engine/Public/Animation/AnimCurveTypes.h
+@@ -1110,9 +1110,11 @@ struct FRawCurveTracks
+ 	void AddFloatCurveKey(const FSmartName& NewCurve, int32 CurveFlags, float Time, float Value) { AddFloatCurveKey(NewCurve.DisplayName, CurveFlags, Time, Value); }
+ 
+ 	
+-	ENGINE_API void RemoveRedundantKeys(float Tolerance = UE_SMALL_NUMBER, FFrameRate SampleRate = FFrameRate(0,0));
+-
+ #endif // WITH_EDITOR
++
++#if WITH_EDITORONLY_DATA
++	ENGINE_API void RemoveRedundantKeys(float Tolerance = UE_SMALL_NUMBER, FFrameRate SampleRate = FFrameRate(0,0));
++#endif // WITH_EDITORONLY_DATA
+ 	/**
+ 	 * Find curve data based on the curve UID
+ 	 */
+diff --git a/Engine/Source/Runtime/Engine/Public/Animation/AttributesRuntime.h b/Engine/Source/Runtime/Engine/Public/Animation/AttributesRuntime.h
+index a6fcb0782..7bec974e6 100644
+--- a/Engine/Source/Runtime/Engine/Public/Animation/AttributesRuntime.h
++++ b/Engine/Source/Runtime/Engine/Public/Animation/AttributesRuntime.h
+@@ -55,12 +55,12 @@ namespace UE
+ 		/** Helper functionality for attributes animation runtime */
+ 		struct Attributes
+ 		{
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 			UE_DEPRECATED(5.1, "GetAttributeValue with signature using FAnimExtractContext is deprecated use other version instead")
+ 			static ENGINE_API void GetAttributeValue(FStackAttributeContainer& OutAttributes, const FCompactPoseBoneIndex& PoseBoneIndex, const FAnimatedBoneAttribute& Attribute, const FAnimExtractContext& ExtractionContext);
+ 
+ 			static ENGINE_API void GetAttributeValue(FStackAttributeContainer& OutAttributes, const FCompactPoseBoneIndex& PoseBoneIndex, const FAnimatedBoneAttribute& Attribute, double CurrentTime);
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+ 			/** Blend custom attribute values from N set of inputs */
+ 			static ENGINE_API void BlendAttributes(const TArrayView<const FStackAttributeContainer> SourceAttributes, const TArrayView<const float> SourceWeights, FStackAttributeContainer& OutAttributes);
+diff --git a/Engine/Source/Runtime/Experimental/GeometryCollectionEngine/Private/GeometryCollection/GeometryCollectionEngineConversion.cpp b/Engine/Source/Runtime/Experimental/GeometryCollectionEngine/Private/GeometryCollection/GeometryCollectionEngineConversion.cpp
+index 36aa1b38a..b49f754e8 100644
+--- a/Engine/Source/Runtime/Experimental/GeometryCollectionEngine/Private/GeometryCollection/GeometryCollectionEngineConversion.cpp
++++ b/Engine/Source/Runtime/Experimental/GeometryCollectionEngine/Private/GeometryCollection/GeometryCollectionEngineConversion.cpp
+@@ -511,16 +511,22 @@ FMeshDescription* FGeometryCollectionEngineConversion::GetMaxResMeshDescriptionW
+ 	if (StaticMesh->IsHiResMeshDescriptionValid())
+ 	{
+ 		MeshDescription = StaticMesh->GetHiResMeshDescription();
++#if WITH_EDITOR
+ 		SourceModel = &StaticMesh->GetHiResSourceModel();
++#endif
+ 	}
+ 	else
+ 	{
+ 		MeshDescription = StaticMesh->GetMeshDescription(0);
++#if WITH_EDITOR
+ 		SourceModel = &StaticMesh->GetSourceModel(0);
++#endif
+ 	}
+ 
++#if WITH_EDITOR
+ 	InitializeNormalsAndTangentsIfNeededOrRequested(*MeshDescription, &SourceModel->BuildSettings);
+-#endif //WITH_EDITORONLY_DATA
++#endif
++#endif
+ 	return MeshDescription;
+ }
+ 

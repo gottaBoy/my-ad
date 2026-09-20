@@ -1,0 +1,414 @@
+diff --git a/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxMainImport.cpp b/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxMainImport.cpp
+index ec07ec40f..3aeeb8366 100644
+--- a/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxMainImport.cpp
++++ b/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxMainImport.cpp
+@@ -933,7 +933,7 @@ bool FFbxImporter::GetSceneInfo(FString Filename, FbxSceneInfo& SceneInfo, bool
+ 		FbxNodeInfo RootInfo;
+ 		RootInfo.ObjectName = MakeName(RootNode->GetName());
+ 		RootInfo.UniqueId = RootNode->GetUniqueID();
+-		RootInfo.Transform = RootNode->EvaluateGlobalTransform();
++		RootInfo.Transform = FFbxDataConverter::ConvertTransform(RootNode->EvaluateGlobalTransform());
+ 
+ 		RootInfo.AttributeName = NULL;
+ 		RootInfo.AttributeUniqueId = 0;
+@@ -963,9 +963,9 @@ void FFbxImporter::TraverseHierarchyNodeRecursively(FbxSceneInfo& SceneInfo, Fbx
+ 		ChildInfo.UniqueId = ChildNode->GetUniqueID();
+ 		ChildInfo.ParentName = ParentInfo.ObjectName;
+ 		ChildInfo.ParentUniqueId = ParentInfo.UniqueId;
+-		ChildInfo.RotationPivot = ChildNode->RotationPivot.Get();
+-		ChildInfo.ScalePivot = ChildNode->ScalingPivot.Get();
+-		ChildInfo.Transform = ChildNode->EvaluateLocalTransform();
++		ChildInfo.RotationPivot = FFbxDataConverter::ConvertPos(ChildNode->RotationPivot.Get());
++		ChildInfo.ScalePivot = FFbxDataConverter::ConvertPos(ChildNode->ScalingPivot.Get());
++		ChildInfo.Transform = FFbxDataConverter::ConvertTransform(ChildNode->EvaluateLocalTransform());
+ 		if (ChildNode->GetNodeAttribute())
+ 		{
+ 			FbxNodeAttribute *ChildAttribute = ChildNode->GetNodeAttribute();
+diff --git a/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxSceneImportFactory.cpp b/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxSceneImportFactory.cpp
+index 9be7a801e..7ce55eccc 100644
+--- a/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxSceneImportFactory.cpp
++++ b/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxSceneImportFactory.cpp
+@@ -1,6 +1,7 @@
+ // Copyright Epic Games, Inc. All Rights Reserved.
+ 
+ #include "Factories/FbxSceneImportFactory.h"
++#include "ImportUtils/SceneImportHierarchy.h"
+ #include "Misc/CoreMisc.h"
+ #include "Misc/MessageDialog.h"
+ #include "Misc/Paths.h"
+@@ -360,21 +361,6 @@ void UFbxSceneImportFactory::ExtractMaterialInfo(void* FbxImporterVoid, TSharedP
+ 	ExtractMaterialInfoFromNode(FbxImporter, RootNode, SceneInfoPtr, ExtractedMaterials, ExtractedTextures, CurrentHierarchyPath);
+ }
+ 
+-bool IsPartOfSkeletonHierarchy(const TMap<uint64, const UnFbx::FbxNodeInfo*> &NodeInfoMap, const UnFbx::FbxNodeInfo& NodeInfo)
+-{
+-	FString AttributeType = NodeInfo.AttributeType;
+-	if (AttributeType.Compare(TEXT("eSkeleton")) == 0)
+-	{
+-		return true;
+-	}
+-	if (NodeInfoMap.Contains(NodeInfo.ParentUniqueId))
+-	{
+-		const UnFbx::FbxNodeInfo *ParentNodeInfo = *NodeInfoMap.Find(NodeInfo.ParentUniqueId);
+-		return IsPartOfSkeletonHierarchy(NodeInfoMap, *ParentNodeInfo);
+-	}
+-	return false;
+-}
+-
+ void FetchFbxCameraInScene(UnFbx::FFbxImporter *FbxImporter, FbxNode* ParentNode, TSharedPtr<FFbxSceneInfo> SceneInfoPtr)
+ {
+ 	if (ParentNode->GetNodeAttribute() && ParentNode->GetNodeAttribute()->GetAttributeType() == FbxNodeAttribute::eCamera)
+@@ -514,6 +500,13 @@ TSharedPtr<FFbxSceneInfo> UFbxSceneImportFactory::ConvertSceneInfo(void* VoidFbx
+ {
+ 	UnFbx::FFbxImporter *FbxImporter = (UnFbx::FFbxImporter*)VoidFbxImporter;
+ 	UnFbx::FbxSceneInfo &SceneInfo = *((UnFbx::FbxSceneInfo*)VoidFbxSceneInfo);
++	TArray<UE::Import::FSceneImportHierarchyEntry> Hierarchy;
++	FString HierarchyError;
++	if (!UE::Import::BuildSceneImportHierarchy(SceneInfo.HierarchyInfo, Hierarchy, HierarchyError))
++	{
++		UE_LOG(LogFbx, Error, TEXT("Invalid scene hierarchy: %s"), *HierarchyError);
++		return nullptr;
++	}
+ 	TSharedPtr<FFbxSceneInfo> SceneInfoPtr = MakeShareable(new FFbxSceneInfo());
+ 	SceneInfoPtr->NonSkinnedMeshNum = SceneInfo.NonSkinnedMeshNum;
+ 	SceneInfoPtr->SkinnedMeshNum = SceneInfo.SkinnedMeshNum;
+@@ -607,14 +600,9 @@ TSharedPtr<FFbxSceneInfo> UFbxSceneImportFactory::ConvertSceneInfo(void* VoidFbx
+ 	FetchFbxCameraInScene(FbxImporter, RootNodeToImport, SceneInfoPtr);
+ 	FetchFbxLightInScene(FbxImporter, RootNodeToImport, SceneInfoPtr);
+ 
+-	TMap<uint64, const UnFbx::FbxNodeInfo*> NodeInfoMap;
+-	for (const UnFbx::FbxNodeInfo& NodeInfo : SceneInfo.HierarchyInfo)
++	for (const UE::Import::FSceneImportHierarchyEntry& Entry : Hierarchy)
+ 	{
+-		NodeInfoMap.Add(NodeInfo.UniqueId, &NodeInfo);
+-		if (IsPartOfSkeletonHierarchy(NodeInfoMap, NodeInfo))
+-		{
+-			continue;
+-		}
++		const UnFbx::FbxNodeInfo& NodeInfo = SceneInfo.HierarchyInfo[Entry.SourceIndex];
+ 
+ 		TSharedPtr<FFbxNodeInfo> NodeInfoPtr = MakeShareable(new FFbxNodeInfo());
+ 		NodeInfoPtr->NodeName = NodeInfo.ObjectName;
+@@ -624,14 +612,11 @@ TSharedPtr<FFbxSceneInfo> UFbxSceneImportFactory::ConvertSceneInfo(void* VoidFbx
+ 
+ 		//Find the parent
+ 		NodeInfoPtr->ParentNodeInfo = nullptr;
+-		for (TSharedPtr<FFbxNodeInfo> ParentPtr : SceneInfoPtr->HierarchyInfo)
++		if (Entry.ParentIndex != INDEX_NONE)
+ 		{
+-			if (ParentPtr->UniqueId == NodeInfo.ParentUniqueId)
+-			{
+-				NodeInfoPtr->ParentNodeInfo = ParentPtr;
+-				ParentPtr->Childrens.Add(NodeInfoPtr);
+-				break;
+-			}
++			TSharedPtr<FFbxNodeInfo> ParentPtr = SceneInfoPtr->HierarchyInfo[Entry.ParentIndex];
++			NodeInfoPtr->ParentNodeInfo = ParentPtr;
++			ParentPtr->Childrens.Add(NodeInfoPtr);
+ 		}
+ 
+ 		//Find the attribute info
+@@ -649,15 +634,9 @@ TSharedPtr<FFbxSceneInfo> UFbxSceneImportFactory::ConvertSceneInfo(void* VoidFbx
+ 		}
+ 
+ 		//Set the transform
+-		NodeInfoPtr->Transform = FTransform::Identity;
+-		FbxVector4 NewLocalT = NodeInfo.Transform.GetT();
+-		FbxVector4 NewLocalS = NodeInfo.Transform.GetS();
+-		FbxQuaternion NewLocalQ = NodeInfo.Transform.GetQ();
+-		NodeInfoPtr->Transform.SetTranslation(UnFbx::FFbxDataConverter::ConvertPos(NewLocalT));
+-		NodeInfoPtr->Transform.SetScale3D(UnFbx::FFbxDataConverter::ConvertScale(NewLocalS));
+-		NodeInfoPtr->Transform.SetRotation(UnFbx::FFbxDataConverter::ConvertRotToQuat(NewLocalQ));
+-		NodeInfoPtr->PivotRotation = UnFbx::FFbxDataConverter::ConvertPos(NodeInfo.RotationPivot);
+-		NodeInfoPtr->PivotScaling = UnFbx::FFbxDataConverter::ConvertPos(NodeInfo.ScalePivot);
++		NodeInfoPtr->Transform = NodeInfo.Transform;
++		NodeInfoPtr->PivotRotation = NodeInfo.RotationPivot;
++		NodeInfoPtr->PivotScaling = NodeInfo.ScalePivot;
+ 		
+ 		//Set the attribute pivot dictionary
+ 		if (NodeInfoPtr->AttributeInfo.IsValid())
+@@ -699,27 +678,12 @@ TSharedPtr<FFbxSceneInfo> UFbxSceneImportFactory::ConvertSceneInfo(void* VoidFbx
+ 			NodeInfoPtr->Transform = LightTransform * NodeInfoPtr->Transform;
+ 		}
+ 
+-		//by default we import all node
+-		NodeInfoPtr->bImportNode = true;
++		NodeInfoPtr->bImportNode = Entry.bImportNode;
+ 
+ 		//Add the node to the hierarchy
+ 		SceneInfoPtr->HierarchyInfo.Add(NodeInfoPtr);
+ 	}
+ 
+-	for (TSharedPtr<FFbxNodeInfo> NodeInfo : SceneInfoPtr->HierarchyInfo)
+-	{
+-		if (NodeInfo->AttributeType.Compare(TEXT("eLODGroup")) == 0)
+-		{
+-			for (TSharedPtr<FFbxNodeInfo> ChildNodeInfo : NodeInfo->Childrens)
+-			{
+-				if (ChildNodeInfo->AttributeType.Compare(TEXT("eMesh")) != 0)
+-				{
+-					//We don't import under LOD group other stuff then the mesh
+-					ChildNodeInfo->bImportNode = false;
+-				}
+-			}
+-		}
+-	}
+ 	return SceneInfoPtr;
+ }
+ 
+@@ -953,18 +917,12 @@ void UFbxSceneImportFactory::ChangeFrontAxis(void* VoidFbxImporter, void* VoidSc
+ 		//Set the fbx data
+ 		UnFbx::FbxNodeInfo &RootNodeInfo = SceneInfo->HierarchyInfo[0];
+ 		check(RootNodeInfo.UniqueId == RootNode->GetUniqueID());
+-		RootNodeInfo.Transform = RootNode->EvaluateGlobalTransform();
++		RootNodeInfo.Transform = UnFbx::FFbxDataConverter::ConvertTransform(RootNode->EvaluateGlobalTransform());
+ 		//Set the UE data
+ 		TSharedPtr<FFbxNodeInfo> RootNodeInfoPtr = GetNodeInfoPtrById(SceneInfoPtr->HierarchyInfo, RootNodeInfo.UniqueId);
+ 		if (RootNodeInfoPtr.IsValid())
+ 		{
+-			RootNodeInfoPtr->Transform = FTransform::Identity;
+-			FbxVector4 NewLocalT = RootNodeInfo.Transform.GetT();
+-			FbxVector4 NewLocalS = RootNodeInfo.Transform.GetS();
+-			FbxQuaternion NewLocalQ = RootNodeInfo.Transform.GetQ();
+-			RootNodeInfoPtr->Transform.SetTranslation(UnFbx::FFbxDataConverter::ConvertPos(NewLocalT));
+-			RootNodeInfoPtr->Transform.SetScale3D(UnFbx::FFbxDataConverter::ConvertScale(NewLocalS));
+-			RootNodeInfoPtr->Transform.SetRotation(UnFbx::FFbxDataConverter::ConvertRotToQuat(NewLocalQ));
++			RootNodeInfoPtr->Transform = RootNodeInfo.Transform;
+ 			for (int32 NodeIndex = 1; NodeIndex < SceneInfo->HierarchyInfo.Num(); ++NodeIndex)
+ 			{
+ 				UnFbx::FbxNodeInfo &LocalNodeInfo = SceneInfo->HierarchyInfo[NodeIndex];
+@@ -974,17 +932,11 @@ void UFbxSceneImportFactory::ChangeFrontAxis(void* VoidFbxImporter, void* VoidSc
+ 					continue;
+ 				}
+ 
+-				LocalNodeInfo.Transform = RealFbxNode->EvaluateLocalTransform();
++				LocalNodeInfo.Transform = UnFbx::FFbxDataConverter::ConvertTransform(RealFbxNode->EvaluateLocalTransform());
+ 				TSharedPtr<FFbxNodeInfo> LocalNodeInfoPtr = GetNodeInfoPtrById(SceneInfoPtr->HierarchyInfo, LocalNodeInfo.UniqueId);
+ 				if (LocalNodeInfoPtr.IsValid())
+ 				{
+-					LocalNodeInfoPtr->Transform = FTransform::Identity;
+-					NewLocalT = LocalNodeInfo.Transform.GetT();
+-					NewLocalS = LocalNodeInfo.Transform.GetS();
+-					NewLocalQ = LocalNodeInfo.Transform.GetQ();
+-					LocalNodeInfoPtr->Transform.SetTranslation(UnFbx::FFbxDataConverter::ConvertPos(NewLocalT));
+-					LocalNodeInfoPtr->Transform.SetScale3D(UnFbx::FFbxDataConverter::ConvertScale(NewLocalS));
+-					LocalNodeInfoPtr->Transform.SetRotation(UnFbx::FFbxDataConverter::ConvertRotToQuat(NewLocalQ));
++					LocalNodeInfoPtr->Transform = LocalNodeInfo.Transform;
+ 
+ 					FString AttributeType = LocalNodeInfo.AttributeType;
+ 					if (AttributeType.Compare(TEXT("eLight")) == 0)
+@@ -1079,13 +1031,30 @@ FFeedbackContext*	Warn
+ 
+ 	UnFbx::FbxSceneInfo SceneInfo;
+ 	//Read the scene and found all instance with their scene information.
+-	FbxImporter->GetSceneInfo(FbxImportFileName, SceneInfo, true);
++	if (!FbxImporter->GetSceneInfo(FbxImportFileName, SceneInfo, true))
++	{
++		FbxImporter->ReleaseScene();
++		GlobalImportSettings = nullptr;
++		Warn->EndSlowTask();
++		GEditor->GetEditorSubsystem<UImportSubsystem>()->BroadcastAssetPostImport(this, World);
++		return nullptr;
++	}
+ 	
+ 	GlobalImportSettingsReference = new UnFbx::FBXImportOptions();
+ 	SFbxSceneOptionWindow::CopyFbxOptionsToFbxOptions(GlobalImportSettings, GlobalImportSettingsReference);
+ 
+ 	//Convert old structure to the new scene export structure
+ 	TSharedPtr<FFbxSceneInfo> SceneInfoPtr = ConvertSceneInfo(FbxImporter, &SceneInfo);
++	if (!SceneInfoPtr.IsValid())
++	{
++		delete GlobalImportSettingsReference;
++		GlobalImportSettingsReference = nullptr;
++		GlobalImportSettings = nullptr;
++		FbxImporter->ReleaseScene();
++		Warn->EndSlowTask();
++		GEditor->GetEditorSubsystem<UImportSubsystem>()->BroadcastAssetPostImport(this, World);
++		return nullptr;
++	}
+ 	
+ 	//Get import material info
+ 	ExtractMaterialInfo(FbxImporter, SceneInfoPtr);
+diff --git a/Engine/Source/Editor/UnrealEd/Private/Fbx/ReimportFbxSceneFactory.cpp b/Engine/Source/Editor/UnrealEd/Private/Fbx/ReimportFbxSceneFactory.cpp
+index 4c4078225..ae5bf1fcf 100644
+--- a/Engine/Source/Editor/UnrealEd/Private/Fbx/ReimportFbxSceneFactory.cpp
++++ b/Engine/Source/Editor/UnrealEd/Private/Fbx/ReimportFbxSceneFactory.cpp
+@@ -443,10 +443,23 @@ EReimportResult::Type UReimportFbxSceneFactory::Reimport(UObject* Obj)
+ 
+ 	UnFbx::FbxSceneInfo SceneInfo;
+ 	//Read the scene and found all instance with their scene information.
+-	FbxImporter->GetSceneInfo(FbxImportFileName, SceneInfo, true);
++	if (!FbxImporter->GetSceneInfo(FbxImportFileName, SceneInfo, true))
++	{
++		FbxImporter->ReleaseScene();
++		GlobalImportSettings = nullptr;
++		GWarn->EndSlowTask();
++		return EReimportResult::Failed;
++	}
+ 
+ 	//Convert old structure to the new scene export structure
+ 	TSharedPtr<FFbxSceneInfo> SceneInfoPtr = ConvertSceneInfo(FbxImporter, &SceneInfo);
++	if (!SceneInfoPtr.IsValid())
++	{
++		FbxImporter->ReleaseScene();
++		GlobalImportSettings = nullptr;
++		GWarn->EndSlowTask();
++		return EReimportResult::Failed;
++	}
+ 	//Get import material info
+ 	ExtractMaterialInfo(FbxImporter, SceneInfoPtr);
+ 
+diff --git a/Engine/Source/Editor/UnrealEd/Public/FbxImporter.h b/Engine/Source/Editor/UnrealEd/Public/FbxImporter.h
+index f4e16ca4f..a4ebc33ba 100644
+--- a/Engine/Source/Editor/UnrealEd/Public/FbxImporter.h
++++ b/Engine/Source/Editor/UnrealEd/Public/FbxImporter.h
+@@ -3,6 +3,7 @@
+ #pragma once
+ 
+ #include "CoreMinimal.h"
++#include "ImportUtils/SceneImportNodeInfo.h"
+ #include "UObject/WeakObjectPtr.h"
+ #include "Misc/SecureHash.h"
+ #include "Factories/FbxAnimSequenceImportData.h"
+@@ -416,22 +417,7 @@ struct FbxMeshInfo
+ 	int32 MorphNum;
+ };
+ 
+-//Node use to store the scene hierarchy transform will be relative to the parent
+-struct FbxNodeInfo
+-{
+-	FString ObjectName;
+-	uint64 UniqueId;
+-	FbxAMatrix Transform;
+-	FbxVector4 RotationPivot;
+-	FbxVector4 ScalePivot;
+-	
+-	FString AttributeName;
+-	uint64 AttributeUniqueId;
+-	FString AttributeType;
+-
+-	FString ParentName;
+-	uint64 ParentUniqueId;
+-};
++using FbxNodeInfo = UE::Import::FSceneNodeInfo;
+ 
+ struct FbxSceneInfo
+ {
+@@ -1942,4 +1928,3 @@ private:
+ 
+ } // namespace UnFbx
+ 
+-
+diff --git a/Engine/Source/Editor/UnrealEd/Public/ImportUtils/SceneImportNodeInfo.h b/Engine/Source/Editor/UnrealEd/Public/ImportUtils/SceneImportNodeInfo.h
+new file mode 100644
+index 000000000..223e2c459
+--- /dev/null
++++ b/Engine/Source/Editor/UnrealEd/Public/ImportUtils/SceneImportNodeInfo.h
+@@ -0,0 +1,24 @@
++#pragma once
++
++#include "CoreMinimal.h"
++
++namespace UE::Import
++{
++// Evaluated in Unreal coordinates. The root transform is global; children are parent-relative.
++// This metadata stores the decomposed transform consumed by the scene factory, not a raw matrix.
++struct FSceneNodeInfo
++{
++	FString ObjectName;
++	uint64 UniqueId = 0;
++	FTransform Transform;
++	FVector RotationPivot = FVector(0.0);
++	FVector ScalePivot = FVector(0.0);
++
++	FString AttributeName;
++	uint64 AttributeUniqueId = 0;
++	FString AttributeType;
++
++	FString ParentName;
++	uint64 ParentUniqueId = 0;
++};
++}
+diff --git a/Engine/Source/Editor/UnrealEd/Public/ImportUtils/SceneImportHierarchy.h b/Engine/Source/Editor/UnrealEd/Public/ImportUtils/SceneImportHierarchy.h
+new file mode 100644
+index 000000000..0bfb63dc6
+--- /dev/null
++++ b/Engine/Source/Editor/UnrealEd/Public/ImportUtils/SceneImportHierarchy.h
+@@ -0,0 +1,77 @@
++#pragma once
++
++#include "SceneImportNodeInfo.h"
++
++namespace UE::Import
++{
++struct FSceneImportHierarchyEntry
++{
++	int32 SourceIndex = INDEX_NONE;
++	int32 ParentIndex = INDEX_NONE;
++	bool bImportNode = true;
++};
++
++// Source records must be parent-first. ParentIndex addresses Output, not Source.
++// Skeleton subtrees are retained in the source but omitted from the actor hierarchy.
++inline bool BuildSceneImportHierarchy(TConstArrayView<FSceneNodeInfo> Source,
++	TArray<FSceneImportHierarchyEntry>& Output, FString& Error)
++{
++	Error.Reset();
++	if (Source.IsEmpty())
++	{
++		Error = TEXT("Missing scene root");
++		return false;
++	}
++	TArray<FSceneImportHierarchyEntry> Result;
++	TMap<uint64, int32> SourceIndices;
++	TMap<uint64, int32> OutputIndices;
++	TSet<uint64> SkeletonNodes;
++	for (int32 Index = 0; Index < Source.Num(); ++Index)
++	{
++		const FSceneNodeInfo& Node = Source[Index];
++		if (SourceIndices.Contains(Node.UniqueId) || (Index > 0 && Node.UniqueId == 0))
++		{
++			Error = TEXT("Duplicate or reserved scene node identity");
++			return false;
++		}
++		int32 ParentSourceIndex = INDEX_NONE;
++		if (Index == 0)
++		{
++			if (Node.ParentUniqueId != 0)
++			{
++				Error = TEXT("Scene root must not have a parent");
++				return false;
++			}
++		}
++		else
++		{
++			const int32* Parent = SourceIndices.Find(Node.ParentUniqueId);
++			if (!Parent || Node.ParentUniqueId == Node.UniqueId)
++			{
++				Error = TEXT("Missing, cyclic or non-parent-first scene hierarchy");
++				return false;
++			}
++			ParentSourceIndex = *Parent;
++		}
++		SourceIndices.Add(Node.UniqueId, Index);
++		if (Node.AttributeType == TEXT("eSkeleton")
++			|| (Index > 0 && SkeletonNodes.Contains(Node.ParentUniqueId)))
++		{
++			SkeletonNodes.Add(Node.UniqueId);
++			continue;
++		}
++		FSceneImportHierarchyEntry Entry;
++		Entry.SourceIndex = Index;
++		if (ParentSourceIndex != INDEX_NONE)
++		{
++			Entry.ParentIndex = OutputIndices.FindChecked(Node.ParentUniqueId);
++			Entry.bImportNode = Source[ParentSourceIndex].AttributeType != TEXT("eLODGroup")
++				|| Node.AttributeType == TEXT("eMesh");
++		}
++		OutputIndices.Add(Node.UniqueId, Result.Num());
++		Result.Add(Entry);
++	}
++	Output = MoveTemp(Result);
++	return true;
++}
++}

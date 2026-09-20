@@ -23,6 +23,23 @@ x-carla-common: &carla-common
   restart: "no"
 
 services:
+  carla-vulkan:
+    <<: *carla-common
+    image: ${CARLA_TOOLCHAIN_IMAGE:-my-ad/carla-toolchain:arm64}
+    profiles: ["gpu"]
+    entrypoint: []
+    environment:
+      <<: *carla-environment
+      NVIDIA_DRIVER_CAPABILITIES: graphics,utility,compute
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    command: ["bash", "/opt/my-ad/scripts/carla/probe-arm64-vulkan.sh"]
+
   carla-dev:
     <<: *carla-common
     build:

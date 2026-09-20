@@ -1,0 +1,66 @@
+diff --git a/Engine/Source/Runtime/Engine/Public/WorldPartition/WorldPartition.h b/Engine/Source/Runtime/Engine/Public/WorldPartition/WorldPartition.h
+index 052e8c888..6d59d7899 100644
+--- a/Engine/Source/Runtime/Engine/Public/WorldPartition/WorldPartition.h
++++ b/Engine/Source/Runtime/Engine/Public/WorldPartition/WorldPartition.h
+@@ -121,9 +121,12 @@ struct FRuntimeCellTransformerInstance
+ 	GENERATED_USTRUCT_BODY()
+ 
+ #if WITH_EDITORONLY_DATA
++
++#if WITH_EDITOR
+ 	inline void PreTransform(ULevel* InLevel) const { if (Instance) { Instance->PreTransform(InLevel); } }
+ 	inline void Transform(ULevel* InLevel) const { if (Instance) { Instance->Transform(InLevel); } }
+ 	inline void PostTransform(ULevel* InLevel) const { if (Instance) { Instance->PostTransform(InLevel); } }
++#endif
+ 
+ 	/** Runtime cell transformer class */
+ 	UPROPERTY(EditAnywhere, Category = WorldPartitionSetup, AdvancedDisplay)
+@@ -531,7 +534,9 @@ public:
+ #if WITH_EDITORONLY_DATA
+ 	UPROPERTY(DuplicateTransient)
+ 	TObjectPtr<UWorldPartitionEditorHash> EditorHash;
++#endif
+ 
++#if WITH_EDITOR
+ 	FLoaderAdapterAlwaysLoadedActors* AlwaysLoadedActors;
+ 	FLoaderAdapterActorList* ForceLoadedActors;
+ 	FLoaderAdapterActorList* PinnedActors;
+@@ -539,6 +544,8 @@ public:
+ 	IWorldPartitionEditor* WorldPartitionEditor;
+ 
+ private:
++#endif
++#if WITH_EDITORONLY_DATA
+ 	/** Class of WorldPartitionStreamingPolicy to be used to manage world partition streaming. */
+ 	UPROPERTY()
+ 	TSubclassOf<UWorldPartitionStreamingPolicy> WorldPartitionStreamingPolicyClass;
+@@ -626,6 +633,8 @@ private:
+ 	UPROPERTY(EditAnywhere, Category = WorldPartitionSetup, meta = (DisplayName = "Default HLOD Layer", EditCondition="bEnableStreaming", EditConditionHides, HideEditConditionToggle))
+ 	TObjectPtr<class UHLODLayer> DefaultHLODLayer;
+ 
++
++#if WITH_EDITOR
+ 	TArray<FWorldPartitionReference> LoadedSubobjects;
+ 
+ 	struct FWorldPartitionExternalDirtyActorsTrackerReference
+@@ -654,6 +663,7 @@ private:
+ 	};
+ 
+ 	TUniquePtr<FWorldPartitionExternalDirtyActorsTracker> ExternalDirtyActorsTracker;
++#endif
+ 
+ 	TSet<FString> GeneratedLevelStreamingPackageNames;
+ 
+diff --git a/Engine/Source/Runtime/Engine/Public/WorldPartition/WorldPartitionRuntimeHash.h b/Engine/Source/Runtime/Engine/Public/WorldPartition/WorldPartitionRuntimeHash.h
+index 840c5fd33..106b6de4f 100644
+--- a/Engine/Source/Runtime/Engine/Public/WorldPartition/WorldPartitionRuntimeHash.h
++++ b/Engine/Source/Runtime/Engine/Public/WorldPartition/WorldPartitionRuntimeHash.h
+@@ -276,7 +276,7 @@ public:
+ protected:
+ 	virtual EWorldPartitionStreamingPerformance GetStreamingPerformanceForCell(const UWorldPartitionRuntimeCell* Cell) const;
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	struct FAlwaysLoadedActorForPIE
+ 	{
+ 		FAlwaysLoadedActorForPIE(const FWorldPartitionReference& InReference, AActor* InActor)

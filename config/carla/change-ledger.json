@@ -1,0 +1,589 @@
+{
+  "schema_version": 1,
+  "project": "CARLA DGX Spark native ARM64",
+  "policy": {
+    "build_host": "DGX Spark only",
+    "container_architecture": "linux/arm64",
+    "qemu_amd64_is_evidence": false,
+    "missing_evidence_is_pass": false,
+    "silent_feature_removal_is_allowed": false
+  },
+  "entries": [
+    {
+      "id": "build-provenance-retention",
+      "category": "reproducibility",
+      "change": "Retain untracked compatibility source content and executable mode alongside repository HEADs, tracked patches and hashes; track phased ownership in a separate execution plan.",
+      "reason": "Hashes alone cannot restore untracked source, and a passing standalone probe cannot establish a later product milestone.",
+      "paths": [
+        "scripts/carla/capture_build_manifest.py",
+        "tests/test_carla_build_manifest.py",
+        "docs/carla-build-manifest.md",
+        "config/carla/execution-plan.json",
+        "docs/carla-execution-plan.md",
+        "tests/test_carla_execution_plan.py"
+      ],
+      "validation": [
+        "ARM64 Docker source/snapshot hash and executable-mode tests",
+        "make carla-manifest",
+        "make carla-manifest-verify MANIFEST=<container-path>",
+        "Acyclic execution-plan and product-gate ordering tests"
+      ],
+      "boundary": "A retained input snapshot and a work plan are not a clean-checkout rebuild, completed Editor/Cook, Server RPC or Autoware acceptance."
+    },
+    {
+      "id": "arm64-toolchain",
+      "category": "architecture",
+      "change": "Select ARM64 target triples and native host toolchain paths for CARLA CMake and Unreal UBT.",
+      "reason": "The original paths resolve to x86_64 libraries or host tools on DGX.",
+      "paths": [
+        "third_party/carla/CMake/Toolchain.cmake",
+        "third_party/carla/CMake/Common.cmake",
+        "scripts/carla/ue-arm64-third-party.cmake",
+        "scripts/carla/prepare-arm64-ue-toolchain.sh",
+        "third_party/unreal-engine/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxToolChain.cs",
+        "images/carla-arm64/Dockerfile"
+      ],
+      "validation": [
+        "ARM64 ELF architecture",
+        "target triple and sysroot checks",
+        "LibCarla and CarlaUnreal build stages"
+      ],
+      "boundary": "Does not prove Unreal Editor, Cook, Server RPC or GPU sensors."
+    },
+    {
+      "id": "shader-conductor-arm64",
+      "category": "third-party",
+      "change": "Build ShaderConductor, DXC and hlslcc with ARM64-compatible flags and isolate static-library symbols.",
+      "reason": "The upstream build path carries x86/SSE flags and cross-DSO C++ symbol interposition is unsafe.",
+      "paths": [
+        "scripts/carla/patches/shaderconductor-native-arm64.patch",
+        "scripts/carla/build-arm64-shader-deps.sh",
+        "scripts/carla/build-arm64-scw.sh",
+        "scripts/carla/check-shader-output.py",
+        "third_party/unreal-engine/Engine/Source/Developer/ShaderCompilerCommon/Private/ShaderConductorContext.cpp",
+        "third_party/unreal-engine/Engine/Source/ThirdParty/ShaderConductor/ShaderConductor.Build.cs"
+      ],
+      "validation": [
+        "native ARM64 ShaderConductor build",
+        "SPIR-V and DXIL smoke output",
+        "ShaderCompileWorker linkage"
+      ],
+      "boundary": "Does not prove a cooked CARLA map or Vulkan sensor output."
+    },
+    {
+      "id": "audio-pic",
+      "category": "third-party",
+      "change": "Rebuild Ogg and Opus as position-independent ARM64 libraries and deploy them through the UE target layout.",
+      "reason": "Editor-side Linux ARM64 linking requires PIC variants that were absent from the original dependency layout.",
+      "paths": [
+        "scripts/carla/build-arm64-audio-deps.sh",
+        "scripts/carla/audio-smoke.c",
+        "tests/test_carla_audio_deps.py"
+      ],
+      "validation": [
+        "PIC archive/shared linkage",
+        "native encode/decode smoke test"
+      ],
+      "boundary": "Does not remove FBX or USD Editor dependencies."
+    },
+    {
+      "id": "assimp-static-bridge",
+      "category": "fbx-backend",
+      "change": "Add an ARM64 Assimp FBX backend and a real UE FMeshDescription bridge using paired Assimp C API ownership and full symbol isolation.",
+      "reason": "Assimp is an open backend comparison and avoids crossing UE and vendor allocator/vtable boundaries.",
+      "paths": [
+        "scripts/carla/build-arm64-assimp.sh",
+        "scripts/carla/check-assimp-fbx.py",
+        "scripts/carla/assimp-probe",
+        "scripts/carla/ue-meshbridge/Source/CarlaAssimpMesh"
+      ],
+      "validation": [
+        "Assimp v6.0.5 pinned tests",
+        "real UE FMeshDescription conversion",
+        "material/UV/normal/transform checks"
+      ],
+      "boundary": "Does not replace Autodesk SDK ABI, Legacy UnrealEd, UStaticMesh assets, Editor or Cook."
+    },
+    {
+      "id": "ufbx-static-bridge",
+      "category": "fbx-backend",
+      "change": "Add pinned ufbx v0.23.0 shared/PIC static ARM64 builds, source-ID scene extraction and a dual-backend UE bridge.",
+      "reason": "ufbx provides a small C implementation with a usable ARM64 path; its coordinate and geometry APIs are used directly.",
+      "paths": [
+        "scripts/carla/build-arm64-ufbx.sh",
+        "scripts/carla/check-ufbx-fbx.py",
+        "scripts/carla/ufbx-probe",
+        "scripts/carla/ue-meshbridge/Source/CarlaUfbxMesh"
+      ],
+      "validation": [
+        "ufbx v0.23.0 commit fcc5d6ba444cfd3eb80677dba5e37e493941abe5",
+        "static/shared archive architecture checks",
+        "real FBX hierarchy, instances, units, winding and failure-atomicity"
+      ],
+      "boundary": "Static scene and mesh payloads only; animation, skin, morph, material shading, Editor and Cook remain separate."
+    },
+    {
+      "id": "interchange-static",
+      "category": "ue-interface",
+      "change": "Connect the ufbx scene model to genuine UE Interchange scene/mesh nodes and standard static MeshPayload serialization.",
+      "reason": "Interchange is a smaller backend-neutral boundary than migrating every Legacy FBX consumer at once.",
+      "paths": [
+        "scripts/carla/ue-interchange",
+        "scripts/carla/probe-arm64-interchange-nodes.sh",
+        "scripts/carla/check_ue_interchange.py",
+        "tests/test_carla_interchange.py"
+      ],
+      "validation": [
+        "native ARM64 UBT Program",
+        "node container serialization round trip",
+        "payload file round trip and instance material bindings",
+        "source-bound case-sensitive key plus transform request identity",
+        "all meshes in identity/translated/mirrored requests, real Dispatcher JSON round trip",
+        "small-scale directions, float collapse, failure atomicity and same-count attribute mutation rejection"
+      ],
+      "boundary": "Does not claim InterchangeWorker, translator, factory assets, material shading, Editor or Cook."
+    },
+    {
+      "id": "ufbx-payload-query",
+      "category": "ue-interface",
+      "change": "Add UE-native static payload lookup, canonical request identity, stable direction transforms and per-request report validation.",
+      "reason": "The old prototype baked identity only, used content-only filenames and reported geometry for the first mesh; UE absolute direction normalization also lost small-scale normals.",
+      "paths": [
+        "scripts/carla/ue-meshbridge/Source/CarlaUfbxMesh/Public/CarlaUfbxScene.h",
+        "scripts/carla/ue-meshbridge/Source/CarlaUfbxMesh/Private/CarlaUfbxPayload.cpp",
+        "scripts/carla/ue-interchange/Source/CarlaInterchangeProbe/Private/CarlaInterchangePayloadChecks.cpp",
+        "tests/test_carla_interchange_payloads.py",
+        "docs/carla-interchange.md"
+      ],
+      "validation": [
+        "make carla-interchange JOBS=4",
+        "20 scene and 27 payload native checks",
+        "per-request file hash and metric rejection tests"
+      ],
+      "boundary": "In-process Dispatcher classes and static UE query only; no worker process, parser backend replacement, animation, morph, factory assets or Editor."
+    },
+    {
+      "id": "imath-arm64-pic",
+      "category": "native-dependency",
+      "change": "Build pinned Imath 3.1.9 Release PIC static library with UE sysroot/libc++ into an isolated artifact prefix.",
+      "reason": "The full USD path needs native compatible dependencies rather than x86 libraries or headers alone.",
+      "paths": [
+        "scripts/carla/usd/build-arm64-imath.sh",
+        "scripts/carla/usd/imath-smoke.cpp",
+        "tests/test_carla_imath.py",
+        "docs/carla-imath-native.md",
+        "Makefile"
+      ],
+      "validation": [
+        "make carla-imath JOBS=4",
+        "AArch64 archive members and whole-archive PIC shared link",
+        "native half/vector/matrix/color/libc++ smoke and fail-closed timeout tests"
+      ],
+      "boundary": "Imath only; not PyImath, UE deployment, full USD SDK or Editor acceptance. Source snapshots include actual local configuration templates."
+    },
+    {
+      "id": "native-static-parser",
+      "category": "ue-interface",
+      "change": "Add an explicit ARM64 Program-only implementation of the real FInterchangeFbxParser using an engine-owned modular-feature session interface and project ufbx provider.",
+      "reason": "Engine modules cannot depend on project bridge modules; real parser lifecycle and output publication must replace the standalone recording facade before Worker integration.",
+      "paths": [
+        "scripts/carla/prepare_interchange_parser.py",
+        "scripts/carla/ue-parser",
+        "scripts/carla/check_ue_parser.py",
+        "tests/test_carla_native_parser.py",
+        "scripts/carla/ue-interchange/Source/CarlaInterchangeProbe/Private/CarlaNativeParserChecks.cpp",
+        "third_party/unreal-engine/Engine/Plugins/Interchange/Runtime/Source/Parsers/Fbx/InterchangeFbxParser.Build.cs",
+        "docs/carla-native-parser.md"
+      ],
+      "validation": [
+        "make carla-interchange-parser JOBS=4",
+        "31 native lifecycle/query checks and eleven retained graph/payload outputs",
+        "source preparation replay, conflict rejection and retained before/after patches"
+      ],
+      "boundary": "Static serial Program slice only, default OFF and forbidden for Editor; no real Worker, material shader/factory assets, full FBX settings, animation, export or Cook acceptance."
+    },
+    {
+      "id": "alembic-arm64-ogawa",
+      "category": "native-dependency",
+      "change": "Build Alembic 1.8.6 Release PIC static with an explicitly verified Imath prerequisite and native Ogawa archive write/read smoke.",
+      "reason": "USD requires compatible native geometry I/O dependencies; an unverified Imath prefix cannot satisfy the dependency chain.",
+      "paths": [
+        "scripts/carla/usd/build-arm64-alembic.sh",
+        "scripts/carla/usd/alembic-smoke.cpp",
+        "tests/test_carla_alembic.py",
+        "docs/carla-alembic-native.md",
+        "Makefile"
+      ],
+      "validation": [
+        "make carla-alembic JOBS=4 IMATH_REPORT=<verified-report>",
+        "103 AArch64 archive members and whole-archive PIC link",
+        "separate-process Ogawa write/read and truncated/missing/overwrite rejection"
+      ],
+      "boundary": "Ogawa only in isolated prefix; HDF5 and Python are not built; not OpenUSD deployment or Editor acceptance."
+    },
+    {
+      "id": "opensubdiv-arm64-cpu",
+      "category": "native-dependency",
+      "change": "Build OpenSubdiv 3.6.0 Release osdCPU PIC static with UE sysroot/libc++ and exercise CPU Catmull-Clark subdivision.",
+      "reason": "A native CPU subdivision implementation is required for the pinned USD dependency graph.",
+      "paths": [
+        "scripts/carla/usd/build-arm64-opensubdiv.sh",
+        "scripts/carla/usd/opensubdiv-smoke.cpp",
+        "tests/test_carla_opensubdiv.py",
+        "docs/carla-opensubdiv-native.md",
+        "Makefile"
+      ],
+      "validation": [
+        "make carla-opensubdiv JOBS=4",
+        "47 AArch64 archive members and whole-archive PIC link",
+        "9 refined vertices, 4 faces, 54 coordinate checks and translated-input control"
+      ],
+      "boundary": "osdCPU only; not GPU backends, Python, full OpenSubdiv, UE deployment or Editor/Cook."
+    },
+    {
+      "id": "native-static-worker-ipc",
+      "category": "ue-interface",
+      "change": "Extract the shared ufbx Interchange provider and run the real Worker launch module over UE TCP command queues with explicit static opt-in.",
+      "reason": "In-process parser checks did not establish child-process startup, task isolation, error propagation or termination; the original Worker ignored several failures.",
+      "paths": [
+        "scripts/carla/prepare_interchange_worker.py",
+        "scripts/carla/ue-parser/InterchangeWorkerStatic.cpp",
+        "scripts/carla/check_ue_worker.py",
+        "scripts/carla/ue-interchange/Source/CarlaUfbxInterchange",
+        "scripts/carla/ue-interchange/Source/CarlaInterchangeWorker.Target.cs",
+        "tests/test_carla_worker.py",
+        "docs/carla-native-worker.md"
+      ],
+      "validation": [
+        "make carla-interchange-worker JOBS=4",
+        "five actual Worker child processes and 23 native IPC checks",
+        "source replay/conflict tests and failure-only report fixtures",
+        "31 parser and 20-scene/27-payload regressions after provider extraction"
+      ],
+      "boundary": "Default SDK/thread-pool path remains; static serial opt-in only. Not production WorkerHandler/progress/cancellation, full FBX, Editor, Cook or CARLA RPC."
+    },
+    {
+      "id": "materialx-arm64",
+      "category": "native-dependency",
+      "change": "Build the USD-required MaterialX 1.38.5 six-library static PIC set and validate material XML across separate processes.",
+      "reason": "USD pins 1.38.5, not the generic upstream build-script default 1.38.10; headers or a wrong-version deployment are insufficient.",
+      "paths": [
+        "scripts/carla/usd/build-arm64-materialx.sh",
+        "scripts/carla/usd/materialx-smoke.cpp",
+        "tests/test_carla_materialx.py",
+        "docs/carla-materialx-native.md",
+        "Makefile"
+      ],
+      "validation": [
+        "make carla-materialx JOBS=4",
+        "99 AArch64 archive members and whole-archive PIC shared link",
+        "XML write/read/validate, typed values and malformed input rejection"
+      ],
+      "boundary": "Isolated native libraries/resources only; not GPU rendering, shader-generation correctness, OpenUSD integration or Editor."
+    },
+    {
+      "id": "python311-native-core",
+      "category": "native-dependency",
+      "change": "Build CPython 3.11.8 using the UE ARM64 sysroot, with executable, shared library, static PIC archive and real embedding/extension smoke.",
+      "reason": "The UE patchlevel pins 3.11.8; host Python and prebuilt x86 SDKs cannot establish native Python ABI. Build interpreters require explicit -B to preserve source hashes.",
+      "paths": [
+        "scripts/carla/usd/build-arm64-python.sh",
+        "scripts/carla/usd/python_stage.py",
+        "scripts/carla/usd/python-smoke.c",
+        "tests/test_carla_python.py",
+        "docs/carla-python-native.md",
+        "Makefile"
+      ],
+      "validation": [
+        "pinned official archive SHA256 and safe extraction",
+        "native ELF/stdlib/extension/shared and static embedding checks",
+        "whole-archive PIC link and exact pristine/patched source rehash",
+        "13 focused tests including bytecode mutation rejection"
+      ],
+      "boundary": "Core stdlib only. SSL/ctypes/SQLite/compression and other optional modules remain missing; no pip, relocatable SDK, Boost/OpenUSD or Editor acceptance."
+    },
+    {
+      "id": "boost-python-arm64",
+      "category": "native-dependency",
+      "change": "Build nine Boost 1.82.0 libraries as native static PIC/shared outputs and test Boost.Python against the pinned CPython shared runtime.",
+      "reason": "OpenUSD requires an ABI-compatible Boost.Python implementation, not the existing x86 SDK, and all nine Boost modules are selected by UE rules.",
+      "paths": [
+        "scripts/carla/usd/build-arm64-boost.sh",
+        "scripts/carla/usd/boost_stage.py",
+        "scripts/carla/usd/boost-smoke.cpp",
+        "scripts/carla/usd/boost-python-smoke.cpp",
+        "tests/test_carla_boost.py",
+        "docs/carla-boost-native.md"
+      ],
+      "validation": [
+        "nine native static/shared libraries and 62 archive members",
+        "whole-archive PIC and native C++ smoke",
+        "CPython extension import/function/class/exception tests",
+        "pinned source archive and Python report SHA256"
+      ],
+      "boundary": "No compressed Iostreams filters, ICU regex extension, NumPy, UE deployment, OpenUSD or full Editor acceptance."
+    },
+    {
+      "id": "tbb-static-arm64",
+      "category": "native-dependency",
+      "change": "Add real release libtbb.a/libtbbmalloc.a PIC archives from original object targets; patch only the isolated source copy.",
+      "reason": "UE IntelTBB requires static libraries in addition to the shared libraries already built for USD.",
+      "paths": [
+        "scripts/carla/usd/build-arm64-tbb-static.sh",
+        "scripts/carla/usd/tbb-static-smoke.cpp",
+        "tests/test_carla_tbb_static.py",
+        "docs/carla-tbb-static.md"
+      ],
+      "validation": [
+        "37/6 original AArch64 object members match archive contents",
+        "direct static and whole-archive shared PIC smoke",
+        "no-exceptions, allocator and parallel workload tests",
+        "strict pristine/patched source retention"
+      ],
+      "boundary": "Release static slice only; not Debug, optional dynamic integrations or shared/static TBB coexistence in the Editor."
+    },
+    {
+      "id": "openusd-source-build",
+      "category": "native-integration",
+      "change": "Add pinned OpenUSD 24.05 UE-patched native build with explicit validated prerequisite report map and real format/plugin/Python smoke.",
+      "reason": "Building individual libraries does not remove the Editor USD SDK blocker; the full CMake dependency graph and runtime resources must be linked and exercised together.",
+      "paths": [
+        "scripts/carla/usd/build-arm64-openusd.sh",
+        "scripts/carla/usd/openusd_stage.py",
+        "scripts/carla/usd/openusd-smoke.py",
+        "config/carla/usd-native-inputs.json",
+        "tests/test_carla_openusd.py",
+        "docs/carla-openusd-build.md",
+        "Makefile"
+      ],
+      "validation": [
+        "pinned official v24.05 commit and six UE patches",
+        "exact report/evidence/transitive prerequisite identity",
+        "CMake required feature and dependency path checks",
+        "full native build and USDA/USDC/Alembic/MaterialX/pxr runtime gate"
+      ],
+      "boundary": "Recipe/plan alone are not PASS; only final native report can establish this source-build stage. Does not prove UE deployment, optional Python modules or Editor/Cook."
+    },
+    {
+      "id": "openusd-native-ue-binding",
+      "category": "ue-interface",
+      "change": "Bind a verified OpenUSD/Boost/Python/shared-TBB prefix set to explicit Linux ARM64 UE rules without overwriting the default x86 SDK layouts.",
+      "reason": "A built USD prefix is not discoverable by the original hard-coded Python/TBB/Boost paths; the wrapper also rewrote plugin LibraryPath to x86_64.",
+      "paths": [
+        "scripts/carla/prepare_native_usd_sdk.py",
+        "scripts/carla/probe-arm64-editor.sh",
+        "tests/test_carla_native_usd_sdk.py",
+        "tests/test_carla_runtime_probes.py",
+        "docs/carla-openusd-build.md",
+        "Makefile"
+      ],
+      "validation": [
+        "OpenUSD report and all dependency hashes verified before and after selection",
+        "five-file idempotent/conflict-aware source patch with before/after snapshots",
+        "full CarlaUnrealEditor dependency graph reaches MovieSceneTools -> FBX instead of missing ARM64 USD"
+      ],
+      "boundary": "Explicit non-relocatable SDK binding only, no Editor compile/link/runtime PASS. Shared TBB/Boost/Python are selected consistently; default rules remain unchanged without the opt-in root."
+    },
+    {
+      "id": "openusd-libcxx-rtti",
+      "category": "abi-compatibility",
+      "change": "Override blanket archive symbol localization for OpenUSD shared/module links and enable non-unique libc++ RTTI comparisons for OpenUSD type-index maps.",
+      "reason": "Real runtime tests exposed import-order locale/stream crashes and failed implicit list/token conversions across RTLD_LOCAL extension DSOs. GDB and copied-output relink diagnostics retained the failure.",
+      "paths": [
+        "scripts/carla/usd/openusd_stage.py",
+        "scripts/carla/usd/openusd-smoke.py",
+        "scripts/carla/usd/diagnose-openusd-linkage.py",
+        "tests/test_carla_openusd.py",
+        "docs/carla-openusd-build.md"
+      ],
+      "validation": [
+        "fresh 2930-action build after flag changes",
+        "ordinary local Python imports, stream formatting, array/list/token conversion",
+        "USDA/USDC, Alembic plugin and official MaterialX GraphlessNodes smoke"
+      ],
+      "boundary": "Flags are scoped to OpenUSD, not a global UE rewrite; engine runtime coexistence remains unverified. Flattened MaterialX with embedded local nodedefs remains unsupported and its failed run is retained."
+    },
+    {
+      "id": "gb10-vulkan-readback",
+      "category": "gpu",
+      "change": "Add a native ARM64 Vulkan render-pass clear/readback probe and an explicit GPU Compose profile.",
+      "reason": "nvidia-smi alone does not establish graphics queue image operations.",
+      "paths": [
+        "scripts/carla/vulkan-readback.c",
+        "scripts/carla/probe-arm64-vulkan.sh",
+        "scripts/carla/check_vulkan_readback.py",
+        "compose.carla-arm64.yaml",
+        "tests/test_carla_vulkan_readback.py"
+      ],
+      "validation": [
+        "real NVIDIA GB10 selection",
+        "graphics queue and render pass",
+        "two exact nonidentical image readbacks"
+      ],
+      "boundary": "Not UE shader rendering, CARLA camera output or sensor validation."
+    },
+    {
+      "id": "runtime-harness",
+      "category": "harness",
+      "change": "Add fail-closed endpoint RPC/RGB/LiDAR checks, immutable input evidence and a root invocation report.",
+      "reason": "A client import, open port or child PASS must not conceal a mismatched or failed outer invocation.",
+      "paths": [
+        "scripts/carla/check_carla_runtime.py",
+        "scripts/carla/probe-arm64-runtime.sh",
+        "scripts/carla/runtime_entry_report.py",
+        "tests/test_carla_runtime_gate.py",
+        "tests/test_carla_runtime_entry.py",
+        "tests/test_carla_runtime_entry_report.py"
+      ],
+      "validation": [
+        "real ARM64 wheel interface check",
+        "version/world/tick and sensor alignment evaluators",
+        "input mutation, timeout and cleanup failure tests"
+      ],
+      "boundary": "No real CARLA Server is currently running; injected tests use harness-test identities."
+    },
+    {
+      "id": "editor-diagnostics",
+      "category": "diagnostic",
+      "change": "Keep full, no-usd and explicit legacy-fbx-headers-only ARM64 Editor dependency probes, with an opt-in USD diagnostic patch.",
+      "reason": "The diagnostics expose USD and FBX blockers without fabricating libraries or silently disabling required features.",
+      "paths": [
+        "scripts/carla/probe-arm64-editor.sh",
+        "scripts/carla/patches/usd-arm64-opt-out.patch",
+        "third_party/unreal-engine/Engine/Source/ThirdParty/FBX/FBX.Build.cs",
+        "Makefile",
+        "tests/test_carla_runtime_probes.py"
+      ],
+      "validation": [
+        "UBT dependency graph evidence",
+        "full profile requires real USD",
+        "no-usd profile records reduced scope",
+        "legacy-fbx-headers-only keeps FBX headers and definitions while skipping the x86_64-only Linux libfbxsdk.so link"
+      ],
+      "boundary": "No-usd is not full Editor support. Legacy-fbx-headers-only is a Linux ARM64 dependency-graph diagnostic only, not FBX parity, a full Editor build, Cook or runtime evidence; default rules still require the real SDK."
+    },
+    {
+      "id": "legacy-fbx-aarch64-header-macros",
+      "category": "compatibility",
+      "change": "Map Linux __aarch64__ in Autodesk FBX 2020.2 fbxarch.h to the same ARM64 model used by the supported Apple path: FBXSDK_ARCH_ARM plus FBXSDK_CPU_64.",
+      "reason": "The Linux header branch supports x86_64 and 32-bit ARM but rejects AArch64 before the CARLA ARM64 Editor can compile Legacy FBX call sites.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/ThirdParty/FBX/2020.2/include/fbxsdk/core/arch/fbxarch.h"
+      ],
+      "validation": [
+        "CarlaUnrealEditor Linux -architecture=arm64 bounded real object compilation",
+        "Strong undefined SDK symbols recorded separately from SDK-typed UE methods"
+      ],
+      "boundary": "This changes architecture declarations only. It does not provide an ARM64 libfbxsdk.so, does not establish FBX runtime parity, and remains paired with the explicit headers-only diagnostic guard."
+    },
+    {
+      "id": "legacy-fbx-bounded-native-diagnostic",
+      "category": "diagnostic",
+      "change": "Export the evaluated CARLA Editor module graph, validate four exact UBT compile actions and retain fresh native objects plus categorized undefined symbols.",
+      "reason": "Lexical references and SkipBuild do not show which real consumers compile; the old platform guard and single-target-flag assumption rejected valid Linux ARM64 diagnostics.",
+      "paths": [
+        "scripts/carla/probe_legacy_fbx.py",
+        "scripts/carla/probe-arm64-editor.sh",
+        "scripts/carla/patches/legacy-fbx-diagnostic.patch",
+        "tests/test_carla_legacy_fbx.py",
+        "tests/test_carla_runtime_probes.py",
+        "docs/carla-legacy-fbx.md",
+        "config/carla/fbx-feature-matrix.json",
+        "tests/test_carla_fbx_feature_matrix.py",
+        "Makefile"
+      ],
+      "validation": [
+        "make carla-legacy-fbx JOBS=4 NATIVE_SDK_ROOT=<verified-sdk>",
+        "Seven evaluated direct FBX consumers; four fresh AArch64 relocatable objects",
+        "222 unique strong SDK symbols and 33 separate SDK-typed UE symbols at the recorded snapshot",
+        "Wrong profile, conflicting target flags, stale objects and wrong architecture are rejected"
+      ],
+      "boundary": "Explicit headers-only diagnostic and work matrix, not a linked Editor, full C++ call graph, SDK parity or product acceptance. No existing default FBX dependency is removed."
+    },
+    {
+      "id": "editor-scalar-math-fixes",
+      "category": "architecture",
+      "change": "Implement scalar packed arithmetic right shift, correct Chaos bit-cast parameter names and double unpack return type, and add the static importer's missing platform-file include.",
+      "reason": "Real Linux ARM64 Editor translation units use the scalar path and exposed these compilation errors; switching platforms would conceal the defect.",
+      "paths": [
+        "scripts/carla/patches/ue-editor-scalar-math.patch",
+        "scripts/carla/legacy-fbx/scalar-math-smoke.cpp",
+        "third_party/unreal-engine/Engine/Source/Runtime/Core/Public/Math/UnrealMathFPU.h",
+        "third_party/unreal-engine/Engine/Source/Runtime/Experimental/ChaosCore/Public/Chaos/VectorUtility.h",
+        "third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxStaticMeshImport.cpp"
+      ],
+      "validation": [
+        "279 native UBSan smoke checks using actual UBT header/compile arguments",
+        "Signed limits, shifts 0..33/255, bit-preserving float casts and double unpack precision",
+        "Real static importer and MovieSceneTools object compilation"
+      ],
+      "boundary": "Scoped scalar fixes only, no NEON/global platform switch, no assertion that every scalar intrinsic or full Editor runtime is validated."
+    },
+    {
+      "id": "legacy-scene-node-metadata",
+      "category": "ue-interface",
+      "change": "Replace SDK matrices/pivots in FbxNodeInfo with UE-owned scene node metadata; convert at real producer/front-axis refresh boundaries and copy UE values in the scene factory.",
+      "reason": "Public by-value SDK members prevent a native backend from supplying scene metadata without inheriting the Autodesk ABI.",
+      "paths": [
+        "scripts/carla/patches/legacy-fbx-node-metadata.patch",
+        "scripts/carla/legacy-fbx/scene-node-info-smoke.cpp",
+        "third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Public/ImportUtils/SceneImportNodeInfo.h",
+        "third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Public/FbxImporter.h",
+        "third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxMainImport.cpp",
+        "third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxSceneImportFactory.cpp"
+      ],
+      "validation": [
+        "Actual producer, consumer and existing caller translation units compile",
+        "Native SDK-free header/ABI smoke with string ownership, IDs, copies, mirrored/small scale and double precision",
+        "Preexisting native Core/BuildSettings/TraceLog support libraries are architecture-checked and retained by content"
+      ],
+      "boundary": "Only the node metadata contract is migrated; FbxImporter.h and the default importer still require the SDK. The original converter is retained, but Autodesk asset/runtime equivalence, factory save/reimport and a fresh Core rebuild are not proven."
+    },
+    {
+      "id": "legacy-shared-factory-hierarchy",
+      "category": "ue-interface",
+      "change": "Extract actual factory hierarchy selection into an SDK-free helper, use it from the real factory and native ufbx adapter, and handle failures in both import and reimport callers.",
+      "reason": "A standalone scene graph is not a factory consumer contract; parent order, IDs, skeleton exclusion, LOD selection and instance bindings must pass the same code used by the consumer.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Public/ImportUtils/SceneImportHierarchy.h",
+        "third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Private/Fbx/FbxSceneImportFactory.cpp",
+        "third_party/unreal-engine/Engine/Source/Editor/UnrealEd/Private/Fbx/ReimportFbxSceneFactory.cpp",
+        "scripts/carla/ue-interchange/Source/CarlaUfbxLegacy",
+        "scripts/carla/ue-interchange/Source/CarlaInterchangeProbe/Private/CarlaLegacyHierarchyChecks.cpp",
+        "scripts/carla/ue-meshbridge/Source/CarlaUfbxMesh/Private/CarlaUfbxScene.cpp",
+        "scripts/carla/check_legacy_hierarchy.py",
+        "scripts/carla/probe_legacy_fbx.py",
+        "scripts/carla/probe-arm64-interchange-nodes.sh",
+        "scripts/carla/patches/legacy-fbx-node-metadata.patch",
+        "tests/test_carla_legacy_hierarchy.py",
+        "docs/carla-legacy-fbx.md",
+        "Makefile"
+      ],
+      "validation": [
+        "make carla-legacy-hierarchy JOBS=4",
+        "26 native checks on shared helper and actual ufbx input, including camera/pivot rejection and instance payloads",
+        "Five fresh native Editor object files, including the real reimport caller",
+        "Counter, source identity, graph mutation and failure-report rejection tests"
+      ],
+      "boundary": "Shared factory hierarchy/data only. The default factory still loads Autodesk scenes; no UStaticMesh creation, package save/reload, asset reimport, Editor/Cook or runtime acceptance is established. Unsupported static metadata is explicitly rejected without reducing the default Editor feature set."
+    },
+    {
+      "id": "source-lock-drift-report",
+      "category": "reproducibility",
+      "change": "Compare source.lock pin commits with the actual captured HEADs of the CARLA and UE repositories on every manifest capture, record the result as a structured source_lock_drift report, and verify it before any git state check.",
+      "reason": "The UE working tree is ahead of the source.lock pin; without a recorded comparison a drifted pin or a later lock edit could pass silently or surface only as an unrelated git status failure.",
+      "paths": [
+        "scripts/carla/capture_build_manifest.py",
+        "tests/test_carla_build_manifest.py",
+        "docs/carla-build-manifest.md",
+        "docs/carla-execution-plan.md"
+      ],
+      "validation": [
+        "21 build-manifest harness tests including drift record, tamper rejection and lock-less capture",
+        "python3 -m unittest discover -s tests (526 tests, 0 failures)",
+        "make test-local"
+      ],
+      "boundary": "The drift report only records pin vs. HEAD state; it does not rewrite source.lock, prove a clean-checkout rebuild, or establish Editor/Cook/runtime acceptance."
+    }
+  ]
+}
