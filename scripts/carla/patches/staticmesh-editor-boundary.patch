@@ -1,0 +1,450 @@
+diff --git a/Engine/Source/Runtime/Engine/Private/StaticMesh.cpp b/Engine/Source/Runtime/Engine/Private/StaticMesh.cpp
+index 861258289..a4d89b27e 100644
+--- a/Engine/Source/Runtime/Engine/Private/StaticMesh.cpp
++++ b/Engine/Source/Runtime/Engine/Private/StaticMesh.cpp
+@@ -34,6 +34,7 @@
+ #include "Rendering/RayTracingGeometryManager.h"
+ #include "NaniteVertexFactory.h"
+ #include "SpeedTreeWind.h"
++#include "UObject/LinkerLoad.h"
+ #include "DistanceFieldAtlas.h"
+ #include "MeshCardBuild.h"
+ #include "MeshCardRepresentation.h"
+@@ -2571,6 +2572,7 @@ static float CalculateViewDistance(float MaxDeviation, float AllowedPixelError)
+ 	return ViewDistance;
+ }
+ 
++#if WITH_EDITOR
+ void FStaticMeshRenderData::ResolveSectionInfo(UStaticMesh* Owner)
+ {
+ 	int32 LODIndex = 0;
+@@ -2647,8 +2649,11 @@ void FStaticMeshRenderData::ResolveSectionInfo(UStaticMesh* Owner)
+ 		ScreenSize[LODIndex].Default = 0.0f;
+ 	}
+ }
++#endif // WITH_EDITOR
++#endif // WITH_EDITOR (outer)
+ 
+-void FStaticMeshRenderData::SyncUVChannelData(const TArray<FStaticMaterial>& ObjectData)
++#if WITH_EDITORONLY_DATA
++ENGINE_API void FStaticMeshRenderData::SyncUVChannelData(const TArray<FStaticMaterial>& ObjectData)
+ {
+ 	TUniquePtr< TArray<FMeshUVChannelInfo> > UpdateData = MakeUnique< TArray<FMeshUVChannelInfo> >();
+ 	UpdateData->Empty(ObjectData.Num());
+@@ -2675,6 +2680,9 @@ void FStaticMeshRenderData::SyncUVChannelData(const TArray<FStaticMaterial>& Obj
+ 		Swap(UVChannelDataPerMaterial, *UpdateData.Get());
+ 	}
+ }
++#endif // WITH_EDITORONLY_DATA
++
++#if WITH_EDITOR
+ 
+ /*------------------------------------------------------------------------------
+ 	FStaticMeshLODSettings
+@@ -3925,8 +3933,10 @@ UStaticMesh::UStaticMesh(const FObjectInitializer& ObjectInitializer)
+ 	bAutoComputeLODScreenSize=true;
+ 	ImportVersion = EImportStaticMeshVersion::BeforeImportStaticMeshVersionWasAdded;
+ 	NumStreamedLODs.Default = -1;
++#if WITH_EDITOR
+ 	GetHiResSourceModel().StaticMeshDescriptionBulkData = CreateDefaultSubobject<UStaticMeshDescriptionBulkData>(TEXT("HiResMeshDescription"));
+ 	GetHiResSourceModel().StaticMeshDescriptionBulkData->SetFlags(RF_Transactional);
++#endif
+ 	SetLegacyTangentScaling(false);
+ #endif // #if WITH_EDITORONLY_DATA
+ 	SetLightMapResolution(4);
+@@ -5082,6 +5092,7 @@ void UStaticMesh::RemoveUnusedMaterialSlots(UStaticMesh* StaticMesh)
+ #endif // WITH_EDITOR
+ }
+ 
++
+ FStaticMeshSourceModel& UStaticMesh::AddSourceModel()
+ {
+ 	WaitUntilAsyncPropertyReleased(EStaticMeshAsyncProperties::SourceModels);
+@@ -5284,6 +5295,101 @@ bool UStaticMesh::TryCancelAsyncTasks()
+ 
+ #endif // WITH_EDITOR
+ 
++#if WITH_EDITORONLY_DATA && !WITH_EDITOR
++// Non-Editor Program targets (CARLA asset probe) need read access to source
++// models to recover persisted geometry from uncooked packages. These mirror the
++// WITH_EDITOR definitions above without touching Editor-only members.
++int32 UStaticMesh::GetNumSourceModels() const
++{
++	return GetSourceModels().Num();
++}
++
++const TArray<FStaticMeshSourceModel>& UStaticMesh::GetSourceModels() const
++{
++	PRAGMA_DISABLE_DEPRECATION_WARNINGS
++	return SourceModels;
++	PRAGMA_ENABLE_DEPRECATION_WARNINGS
++}
++
++const FStaticMeshSourceModel& UStaticMesh::GetSourceModel(int32 Index) const
++{
++	return GetSourceModels()[Index];
++}
++
++FStaticMeshSourceModel& UStaticMesh::GetSourceModel(int32 Index)
++{
++	PRAGMA_DISABLE_DEPRECATION_WARNINGS
++	return SourceModels[Index];
++	PRAGMA_ENABLE_DEPRECATION_WARNINGS
++}
++
++void UStaticMesh::SetNumSourceModels(const int32 Num)
++{
++	PRAGMA_DISABLE_DEPRECATION_WARNINGS
++	const int32 OldNum = SourceModels.Num();
++	if (Num > OldNum)
++	{
++		for (int32 Index = OldNum; Index < Num; ++Index)
++		{
++			SourceModels.AddDefaulted();
++			SourceModels[Index].CreateSubObjects(this);
++		}
++	}
++	else if (Num < OldNum)
++	{
++		SourceModels.RemoveAt(Num, OldNum - Num);
++	}
++	PRAGMA_ENABLE_DEPRECATION_WARNINGS
++}
++
++void UStaticMesh::RemoveSourceModel(const int32 Index)
++{
++	PRAGMA_DISABLE_DEPRECATION_WARNINGS
++	SourceModels.RemoveAt(Index);
++	PRAGMA_ENABLE_DEPRECATION_WARNINGS
++}
++
++bool UStaticMesh::IsSourceModelValid(int32 Index) const
++{
++	return GetSourceModels().IsValidIndex(Index);
++}
++
++FMeshDescription* UStaticMesh::CreateMeshDescription(int32 LodIndex)
++{
++	if (IsSourceModelValid(LodIndex))
++	{
++		FStaticMeshSourceModel& SourceModel = GetSourceModel(LodIndex);
++		return SourceModel.CreateMeshDescription();
++	}
++
++	return nullptr;
++}
++
++FMeshDescription* UStaticMesh::CreateMeshDescription(int32 LodIndex, FMeshDescription InMeshDescription)
++{
++	FMeshDescription* NewMeshDescription = CreateMeshDescription(LodIndex);
++	if (NewMeshDescription != nullptr)
++	{
++		*NewMeshDescription = MoveTemp(InMeshDescription);
++	}
++
++	return NewMeshDescription;
++}
++
++void UStaticMesh::CommitMeshDescription(int32 LodIndex, const FCommitMeshDescriptionParams& Params)
++{
++	check(IsSourceModelValid(LodIndex));
++
++	FStaticMeshSourceModel& SourceModel = GetSourceModel(LodIndex);
++	SourceModel.CommitMeshDescription(Params.bUseHashAsGuid);
++
++	if (Params.bMarkPackageDirty)
++	{
++		MarkPackageDirty();
++	}
++}
++#endif // WITH_EDITORONLY_DATA && !WITH_EDITOR
++
+ void UStaticMesh::BeginDestroy()
+ {
+ 	Super::BeginDestroy();
+@@ -5337,7 +5443,7 @@ bool UStaticMesh::IsReadyForFinishDestroy()
+ 
+ int32 UStaticMesh::GetNumSectionsWithCollision() const
+ {
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	int32 NumSectionsWithCollision = 0;
+ 
+ 	if (GetRenderData() && GetRenderData()->LODResources.Num() > 0)
+@@ -5727,8 +5833,9 @@ bool UStaticMesh::IsCachedCookedPlatformDataLoaded(const ITargetPlatform* Target
+ 
+ 	return true;
+ }
++#endif // WITH_EDITOR
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 
+ bool UStaticMesh::LoadMeshDescription(int32 LodIndex, FMeshDescription& OutMeshDescription) const
+ {
+@@ -5871,14 +5978,21 @@ FMeshDescription* UStaticMesh::GetHiResMeshDescription() const
+ 	return SourceModel.GetOrCacheMeshDescription();
+ }
+ 
++#endif // WITH_EDITOR
+ 
++#if WITH_EDITORONLY_DATA
+ bool UStaticMesh::IsHiResMeshDescriptionValid() const
+ {
+-	const FStaticMeshSourceModel& SourceModel = GetHiResSourceModel();
+-	return SourceModel.IsMeshDescriptionValid();
++#if WITH_EDITOR
++	return HiResSourceModel.IsMeshDescriptionValid();
++#else
++	return false;
++#endif
+ }
+ 
++#endif // WITH_EDITORONLY_DATA
+ 
++#if WITH_EDITOR
+ FMeshDescription* UStaticMesh::CreateHiResMeshDescription()
+ {
+ 	FStaticMeshSourceModel& SourceModel = GetHiResSourceModel();
+@@ -6106,6 +6220,7 @@ bool UStaticMesh::SetUVChannel(int32 LODIndex, int32 UVChannelIndex, const TMap<
+ 
+ #endif
+ 
++#if WITH_EDITOR
+ int32 UStaticMesh::GetNumUVChannels(int32 LODIndex)
+ {
+ 	int32 NumUVChannels = 0;
+@@ -6283,8 +6398,15 @@ void UStaticMesh::Serialize(FArchive& Ar)
+ 
+ 	FStripDataFlags StripFlags( Ar );
+ 
++#if !WITH_EDITOR
++	bool bSkippedTruncatedSpeedTreeWind = false;
++#endif
++
+ 	bool bCooked = Ar.IsCooking();
+ 	Ar << bCooked;
++	if (Ar.IsLoading())
++	{
++	}
+ 
+ #if WITH_EDITORONLY_DATA
+ 	if (Ar.IsLoading() && Ar.UEVer() < VER_UE4_REMOVE_ZERO_TRIANGLE_SECTIONS)
+@@ -6371,7 +6493,10 @@ void UStaticMesh::Serialize(FArchive& Ar)
+ 	SetLightingGuid(LocalLightingGuid);
+ 	Ar << Sockets;
+ 
+-#if WITH_EDITOR
++	if (Ar.IsLoading())
++	{
++	}
++#if WITH_EDITORONLY_DATA
+ 	if (!StripFlags.IsEditorDataStripped())
+ 	{
+ 		for (int32 i = 0; i < GetNumSourceModels(); ++i)
+@@ -6387,20 +6512,28 @@ void UStaticMesh::Serialize(FArchive& Ar)
+ 			}
+ 		}
+ 
++	if (Ar.IsLoading())
++	{
++	}
++#if WITH_EDITOR
+ 		if (Ar.CustomVer(FEditorObjectVersion::GUID) < FEditorObjectVersion::UPropertryForMeshSection)
+ 		{
+ 			GetSectionInfoMap().Serialize(Ar);
+ 		}
++#endif
+ 
+ 		// Need to set a flag rather than do conversion in place as RenderData is not
+ 		// created until postload and it is needed for bounding information
+ 		bRequiresLODDistanceConversion = Ar.UEVer() < VER_UE4_STATIC_MESH_SCREEN_SIZE_LODS;
+ 		bRequiresLODScreenSizeConversion = Ar.CustomVer(FFrameworkObjectVersion::GUID) < FFrameworkObjectVersion::LODsUseResolutionIndependentScreenSize;
+ 	}
+-#endif // #if WITH_EDITOR
++#endif // #if WITH_EDITORONLY_DATA
+ 
+ 	// Inline the derived data for cooked builds. Never include render data when
+ 	// counting memory as it is included by GetResourceSize.
++	if (Ar.IsLoading())
++	{
++	}
+ 	if (bCooked && !IsTemplate() && !Ar.IsCountingMemory())
+ 	{	
+ 		if (Ar.IsLoading())
+@@ -6440,7 +6573,39 @@ void UStaticMesh::Serialize(FArchive& Ar)
+ 				SpeedTreeWind = TSharedPtr<FSpeedTreeWind>(new FSpeedTreeWind);
+ 			}
+ 
+-			Ar << *SpeedTreeWind;
++#if !WITH_EDITOR
++			// Non-editor programs loading editor packages: some editor-decorated
++			// static meshes carry a SpeedTree wind bool but a truncated payload
++			// (the editor build did not stream the full FSpeedTreeWind struct).
++			// Clamp the read against this export's SerialSize so the stream stays
++			// within its boundary and the LinkerLoad size check passes.
++			if (Ar.IsLoading())
++			{
++				FLinkerLoad* Linker = GetLinker();
++				if (Linker != nullptr && Linker->LinkerRoot != nullptr
++					&& Linker->LinkerRoot->GetPathName().StartsWith(TEXT("/Engine/")))
++				{
++					const int32 LinkerIndex = GetLinkerIndex();
++					if (Linker->ExportMap.IsValidIndex(LinkerIndex))
++					{
++						const FObjectExport& Export = Linker->ExportMap[LinkerIndex];
++						const int64 ExportEnd = Export.SerialOffset + Export.SerialSize;
++						const int64 BytesRemaining = ExportEnd - Ar.Tell();
++						// Full FSpeedTreeWind payload is ~1.4KB; anything clearly
++						// smaller (e.g. a 1-slot material tail) cannot hold it.
++						if (BytesRemaining < 1024)
++						{
++							bSkippedTruncatedSpeedTreeWind = true;
++						}
++					}
++				}
++			}
++
++			if (!bSkippedTruncatedSpeedTreeWind)
++#endif
++			{
++				Ar << *SpeedTreeWind;
++			}
+ 		}
+ 	}
+ 
+@@ -6463,10 +6628,15 @@ void UStaticMesh::Serialize(FArchive& Ar)
+ 		SourceFileTimestamp_DEPRECATED = TEXT("");
+ 	}
+ 
++	#if WITH_EDITOR
+ 	if (Ar.IsLoading() && Ar.CustomVer(FRenderingObjectVersion::GUID) < FRenderingObjectVersion::DistanceFieldSelfShadowBias)
+ 	{
+ 		DistanceFieldSelfShadowBias = GetSourceModel(0).BuildSettings.DistanceFieldBias_DEPRECATED * 10.0f;
+ 	}
++#endif
++#endif // WITH_EDITORONLY_DATA
++
++#if WITH_EDITOR
+ 
+ 	if (Ar.IsLoading() && Ar.CustomVer(FRenderingObjectVersion::GUID) < FRenderingObjectVersion::NaniteFallbackTarget)
+ 	{
+@@ -6481,11 +6651,34 @@ void UStaticMesh::Serialize(FArchive& Ar)
+ 	}
+ 
+ 	if (Ar.CustomVer(FEditorObjectVersion::GUID) >= FEditorObjectVersion::RefactorMeshEditorMaterials)
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 	{
+-		Ar << GetStaticMaterials();
++#if !WITH_EDITOR
++		if (bSkippedTruncatedSpeedTreeWind)
++		{
++			// Non-editor programs loading editor packages: the export tail was
++			// truncated by the editor save path, so do not attempt to parse
++			// StaticMaterials out of the stale bytes. Clamp the stream to the
++			// export boundary and leave the (default-constructed) array empty.
++			FLinkerLoad* Linker = GetLinker();
++			if (Linker != nullptr)
++			{
++				const int32 LinkerIndex = GetLinkerIndex();
++				if (Linker->ExportMap.IsValidIndex(LinkerIndex))
++				{
++					const FObjectExport& Export = Linker->ExportMap[LinkerIndex];
++					Ar.Seek(Export.SerialOffset + Export.SerialSize);
++				}
++			}
++			GetStaticMaterials().Empty();
++		}
++		else
++#endif
++		{
++			Ar << GetStaticMaterials();
++		}
+ 	}
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	else if (Ar.IsLoading())
+ 	{
+ 		TArray<UMaterialInterface*> Unique_Materials_DEPRECATED;
+@@ -6514,7 +6707,7 @@ void UStaticMesh::Serialize(FArchive& Ar)
+ 		Materials_DEPRECATED.Empty();
+ 
+ 	}
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 
+ 
+ #if WITH_EDITOR
+@@ -6553,7 +6746,7 @@ void UStaticMesh::Serialize(FArchive& Ar)
+ 	}
+ #endif // WITH_EDITOR
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	if (Ar.IsLoading() && Ar.CustomVer(FFortniteMainBranchObjectVersion::GUID) < FFortniteMainBranchObjectVersion::FixedTangentTransformForNonuniformBuildScale)
+ 	{
+ 		bool bHasNonUniformSourceModel = false;
+@@ -7475,7 +7668,15 @@ void UStaticMesh::BuildFromMeshDescription(const FMeshDescription& MeshDescripti
+ 	FStaticMeshVertexBufferFlags StaticMeshVertexBufferFlags;
+ 	StaticMeshVertexBufferFlags.bNeedsCPUAccess = true;
+ 	StaticMeshVertexBufferFlags.bUseBackwardsCompatibleF16TruncUVs = false;
+-	LODResources.VertexBuffers.StaticMeshVertexBuffer.Init(StaticMeshBuildVertices, VertexInstanceUVs.GetNumChannels(), StaticMeshVertexBufferFlags);
++	// MakeConstMeshBuildVertexView always exposes MAX_STATIC_TEXCOORDS channels and Init(view)
++	// ignores the requested channel count, so truncate the view to the channels the
++	// MeshDescription actually carries instead of padding the buffer with empty channels.
++	const uint32 NumSourceUVChannels = FMath::Clamp(VertexInstanceUVs.GetNumChannels(), 1, MAX_STATIC_TEXCOORDS);
++	{
++		FConstMeshBuildVertexView StaticMeshVertexView = MakeConstMeshBuildVertexView(TConstArrayView<FStaticMeshBuildVertex>(StaticMeshBuildVertices));
++		StaticMeshVertexView.UVs.SetNum(NumSourceUVChannels);
++		LODResources.VertexBuffers.StaticMeshVertexBuffer.Init(StaticMeshVertexView, StaticMeshVertexBufferFlags);
++	}
+ 
+ 	LODResources.bHasColorVertexData = bHasVertexColors;
+ 	FColorVertexBuffer& ColorVertexBuffer = LODResources.VertexBuffers.ColorVertexBuffer;
+@@ -7668,7 +7869,7 @@ bool UStaticMesh::BuildFromMeshDescriptions(const TArray<const FMeshDescription*
+ 		ReleaseResourcesFence.Wait();
+ 	}
+ 
+-	#if WITH_EDITOR
++	#if WITH_EDITORONLY_DATA
+ 	if (Params.bCommitMeshDescription)
+ 	{
+ 		FCommitMeshDescriptionParams CommitParams;
+@@ -8171,8 +8372,8 @@ bool UStaticMesh::ContainsPhysicsTriMeshDataCheckComplex(bool bInUseAllTriData,
+ 
+ bool UStaticMesh::SectionHasCollisionEnabled(const FStaticMeshSection& Section, int32 LODIndex, int32 SectionIndex) const
+ {
+-#if WITH_EDITORONLY_DATA
+-	// we can only use GetSectionInfoMap() in WITH_EDITORONLY_DATA mode
++#if WITH_EDITOR
++	// The section info map is only exposed in editor builds.
+ 	return GetSectionInfoMap().Get(LODIndex, SectionIndex).bEnableCollision;
+ #else // #if WITH_EDITORONLY_DATA
+ 	return Section.bEnableCollision;
+@@ -8460,14 +8661,14 @@ void UStaticMesh::EnforceLightmapRestrictions(bool bUseRenderData)
+ 	// Lightmass only supports 4 UVs from Lightmass::MAX_TEXCOORDS
+ 	int32 NumUVs = 4;
+ 
+-#if !WITH_EDITORONLY_DATA
++#if !WITH_EDITOR
+ 	if (!bUseRenderData)
+ 	{
+ 		//The source models are only available in the editor, fallback on the render data.
+ 		UE_ASSET_LOG(LogStaticMesh, Warning, this, TEXT("Trying to enforce lightmap restrictions using the static mesh SourceModels outside of the Editor."))
+ 		bUseRenderData = true;
+ 	}
+-#endif //WITH_EDITORONLY_DATA
++#endif //WITH_EDITOR
+ 
+ 	if (bUseRenderData)
+ 	{
+@@ -8487,7 +8688,7 @@ void UStaticMesh::EnforceLightmapRestrictions(bool bUseRenderData)
+ 			NumUVs = 1;
+ 		}
+ 	}
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	else
+ 	{
+ 		for (int32 LODIndex = 0; LODIndex < GetNumSourceModels(); ++LODIndex)

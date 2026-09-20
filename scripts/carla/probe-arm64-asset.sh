@@ -40,6 +40,29 @@ printf "%s\n" "${revision}" > "${run}/ue-commit.txt"
 git -c "safe.directory=${ue}" -C "${ue}" diff --binary HEAD > "${run}/ue-tracked.patch"
 step=engine-patches
 engine_git=(git -c "safe.directory=${ue}" -C "${ue}")
+
+# Apply a multi-file patch idempotently, one file at a time. Files already
+# patched (or hand-corrected to an equivalent state) are skipped; files that
+# still need the change are applied. A file failing both the forward and the
+# reverse check is a hard error so divergence is never silent.
+apply_patch_idempotent() {
+  local patch_file="$1" log_file="$2" label="$3"
+  local file failed=0
+  while IFS= read -r file; do
+    if "${engine_git[@]}" apply --reverse --check --include="${file}" "${patch_file}" >> "${log_file}" 2>&1; then
+      printf "%s already applied: %s\n" "${label}" "${file}" >> "${log_file}"
+    elif "${engine_git[@]}" apply --check --include="${file}" "${patch_file}" >> "${log_file}" 2>&1; then
+      "${engine_git[@]}" apply --include="${file}" "${patch_file}" >> "${log_file}" 2>&1
+      printf "%s applied: %s\n" "${label}" "${file}" >> "${log_file}"
+    else
+      printf "%s FAILED (neither applies): %s\n" "${label}" "${file}" >> "${log_file}"
+      failed=1
+    fi
+  done < <(grep -E '^\+\+\+ b/' "${patch_file}" | sed 's#^+++ b/##')
+  cp "${patch_file}" "${run}/"
+  return "${failed}"
+}
+
 animgraph_patch="${scripts}/patches/animgraph-editoronly.patch"
 if "${engine_git[@]}" apply --reverse --check "${animgraph_patch}" > "${run}/animgraph-patch-check.log" 2>&1; then
   printf "AnimGraphRuntime editor-only patch is already applied\n" >> "${run}/animgraph-patch-check.log"
@@ -80,21 +103,44 @@ else
 fi
 cp "${worldpartition_patch}" "${run}/"
 animation_patch="${scripts}/patches/animation-editoronly.patch"
-if "${engine_git[@]}" apply --reverse --check "${animation_patch}" > "${run}/animation-patch-check.log" 2>&1; then
-  printf "Animation editor-only data patch is already applied\n" >> "${run}/animation-patch-check.log"
-else
-  "${engine_git[@]}" apply --check "${animation_patch}" >> "${run}/animation-patch-check.log" 2>&1
-  "${engine_git[@]}" apply "${animation_patch}"
-fi
-cp "${animation_patch}" "${run}/"
+: > "${run}/animation-patch-check.log"
+apply_patch_idempotent "${animation_patch}" "${run}/animation-patch-check.log" "Animation editor-only data patch"
+seqbase_patch="${scripts}/patches/animation-sequencebase-editor-boundary.patch"
+: > "${run}/seqbase-patch-check.log"
+apply_patch_idempotent "${seqbase_patch}" "${run}/seqbase-patch-check.log" "AnimSequenceBase/Helpers editor-only data patch"
 material_patch="${scripts}/patches/material-editor-boundary.patch"
-if "${engine_git[@]}" apply --reverse --check "${material_patch}" > "${run}/material-patch-check.log" 2>&1; then
-  printf "Material editor API boundary patch is already applied\n" >> "${run}/material-patch-check.log"
-else
-  "${engine_git[@]}" apply --check "${material_patch}" >> "${run}/material-patch-check.log" 2>&1
-  "${engine_git[@]}" apply "${material_patch}"
-fi
-cp "${material_patch}" "${run}/"
+: > "${run}/material-patch-check.log"
+apply_patch_idempotent "${material_patch}" "${run}/material-patch-check.log" "Material editor API boundary patch"
+staticmesh_patch="${scripts}/patches/staticmesh-editor-boundary.patch"
+: > "${run}/staticmesh-patch-check.log"
+apply_patch_idempotent "${staticmesh_patch}" "${run}/staticmesh-patch-check.log" "StaticMesh.cpp editor boundary patch"
+skeletalimport_patch="${scripts}/patches/skeletalmesh-importdata-editor-boundary.patch"
+: > "${run}/skeletalimport-patch-check.log"
+apply_patch_idempotent "${skeletalimport_patch}" "${run}/skeletalimport-patch-check.log" "SkeletalMesh importer data editor boundary patch"
+ziptest_patch="${scripts}/patches/fileutilities-zip-test-editoronly.patch"
+: > "${run}/ziptest-patch-check.log"
+apply_patch_idempotent "${ziptest_patch}" "${run}/ziptest-patch-check.log" "FileUtilities zip test editor-only patch"
+materialcache_patch="${scripts}/patches/material-cached-expression.patch"
+: > "${run}/materialcache-patch-check.log"
+apply_patch_idempotent "${materialcache_patch}" "${run}/materialcache-patch-check.log" "Material cached expression fallback patch"
+landscape_patch="${scripts}/patches/landscape-editor-boundary.patch"
+: > "${run}/landscape-patch-check.log"
+apply_patch_idempotent "${landscape_patch}" "${run}/landscape-patch-check.log" "Landscape/PoseWatch editor-only data patch"
+packagemetadata_patch="${scripts}/patches/package-metadata-save.patch"
+: > "${run}/packagemetadata-patch-check.log"
+cp "${packagemetadata_patch}" "${run}/package-metadata-save.patch"
+apply_patch_idempotent "${packagemetadata_patch}" "${run}/packagemetadata-patch-check.log" "Package MetaData save-safe lookup patch"
+sourcedata_patch="${scripts}/patches/staticmesh-sourcedata-editor-boundary.patch"
+: > "${run}/sourcedata-patch-check.log"
+cp "${sourcedata_patch}" "${run}/staticmesh-sourcedata-editor-boundary.patch"
+apply_patch_idempotent "${sourcedata_patch}" "${run}/sourcedata-patch-check.log" "StaticMeshSourceData editor-only data patch"
+scenecapture_patch="${scripts}/patches/scenecapture-editor-decorations.patch"
+: > "${run}/scenecapture-patch-check.log"
+apply_patch_idempotent "${scenecapture_patch}" "${run}/scenecapture-patch-check.log" "SceneCapture editor decoration mesh patch"
+meshdesc_patch="${scripts}/patches/meshdescription-bulkdata-tearoff.patch"
+: > "${run}/meshdesc-patch-check.log"
+cp "${meshdesc_patch}" "${run}/meshdescription-bulkdata-tearoff.patch"
+apply_patch_idempotent "${meshdesc_patch}" "${run}/meshdesc-patch-check.log" "MeshDescription bulk data tear-off patch"
 export CARLA_ASSIMP_INSTALL="${artifacts}/assimp-arm64/6.0.5/install"
 export CARLA_UFBX_INSTALL="${artifacts}/ufbx-arm64/0.23.0/install"
 export CARLA_INTERCHANGE_UFBX_STATIC=0
@@ -131,7 +177,9 @@ for header in SceneImportNodeInfo.h SceneImportHierarchy.h; do
 done
 sha256sum "${BASH_SOURCE[0]}" "${scripts}/check_carla_asset.py" \
   "${scripts}/ufbx-probe/fixtures/multi-mesh.fbx" "${animgraph_patch}" "${reverb_patch}" "${cinematic_patch}" \
-  "${instanced_patch}" "${worldpartition_patch}" "${animation_patch}" "${material_patch}" >> "${run}/source-files.sha256"
+  "${instanced_patch}" "${worldpartition_patch}" "${animation_patch}" "${material_patch}" \
+  "${staticmesh_patch}" "${skeletalimport_patch}" "${ziptest_patch}" "${materialcache_patch}" "${landscape_patch}" "${seqbase_patch}" \
+  "${packagemetadata_patch}" "${sourcedata_patch}" >> "${run}/source-files.sha256"
 base=(bash "${ue}/Engine/Build/BatchFiles/Linux/Build.sh" CarlaAssetProbe Linux Development
   -architecture=arm64 "-project=${project_dir}/CarlaAssetProbe.uproject" -NoUBTMakefiles -NoDumpSyms
   -buildubt -ForceRulesCompile "-MaxParallelActions=${jobs}")
@@ -155,6 +203,9 @@ mkdir -p "${staged_bin}" "${layout}/Engine/Saved" "${run}/assets"
 cp --reflink=auto "${binary}" "${staged_bin}/CarlaAssetProbe"
 cp "${project_dir}/CarlaAssetProbe.uproject" "${staged_project}/"
 cp "${ue}/Engine/Binaries/Linux/CarlaAssetProbe.target" "${staged_bin}/"
+for sc_lib in "${ue}/Engine/Binaries/ThirdParty/ShaderConductor/Linux/aarch64-unknown-linux-gnueabi/"libShaderConductor.so "${ue}/Engine/Binaries/ThirdParty/ShaderConductor/Linux/aarch64-unknown-linux-gnueabi/"libdxcompiler.so; do
+  [[ -f "${sc_lib}" ]] && cp "${sc_lib}" "${staged_bin}/"
+done
 for directory in Binaries Build Config Content Platforms Plugins Shaders; do
   if [[ -d "${ue}/Engine/${directory}" ]]; then
     ln -s "${ue}/Engine/${directory}" "${layout}/Engine/${directory}"
@@ -166,7 +217,7 @@ step=native
 ulimit -c 0
 set +e
 timeout --kill-after=10 180 "${staged_binary}" -nullrhi -unattended -nosound -notraceserver \
-  -NoSplash -stdout -FullStdOutLogOutput -AllowStdOutLogVerbosity \
+  -NoSplash -stdout -FullStdOutLogOutput -AllowStdOutLogVerbosity -DDC-ForceMemoryCache \
   "-abslog=${run}/unreal.log" "-project=${staged_project}/CarlaAssetProbe.uproject" \
   "-input=${scripts}/ufbx-probe/fixtures/multi-mesh.fbx" \
   "-content-root=${run}/assets" "-output=${run}/native.json" > "${run}/native.log" 2>&1

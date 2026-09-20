@@ -1,0 +1,163 @@
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceBase.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceBase.cpp
+index 7f355203c..7c9b40437 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceBase.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceBase.cpp
+@@ -233,11 +233,13 @@ void UAnimSequenceBase::PostLoad()
+ 	RefreshCacheData();
+ 
+ #if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	if (!GetPackage()->GetHasBeenEndLoaded())
+ 	{
+ 		FCoreUObjectDelegates::OnEndLoadPackage.AddUObject(this, &UAnimSequenceBase::OnEndLoadPackage);
+ 	}
+ 	else
++#endif
+ 	{
+ 		OnAnimModelLoaded();
+ 	}
+@@ -825,7 +827,7 @@ FFrameRate UAnimSequenceBase::GetSamplingFrameRate() const
+ 	return DefaultFrameRate;
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ void UAnimSequenceBase::InitializeNotifyTrack()
+ {
+ 	if ( AnimNotifyTracks.Num() == 0 ) 
+@@ -833,6 +835,7 @@ void UAnimSequenceBase::InitializeNotifyTrack()
+ 		AnimNotifyTracks.Add(FAnimNotifyTrack(TEXT("1"), FLinearColor::White ));
+ 	}
+ }
++#endif
+ 
+ int32 UAnimSequenceBase::GetFrameAtTime(const float Time) const
+ {
+@@ -853,6 +856,8 @@ void UAnimSequenceBase::UnregisterOnNotifyChanged(void* Unregister)
+ 	OnNotifyChanged.RemoveAll(Unregister);
+ }
+ 
++#if WITH_EDITORONLY_DATA
++
+ void UAnimSequenceBase::ClampNotifiesAtEndOfSequence()
+ {
+ 	const float NotifyClampTime = GetPlayLength();
+@@ -865,6 +870,9 @@ void UAnimSequenceBase::ClampNotifiesAtEndOfSequence()
+ 		}
+ 	}
+ }
++#endif
++
++#if WITH_EDITOR
+ 
+ EAnimEventTriggerOffsets::Type UAnimSequenceBase::CalculateOffsetForNotify(float NotifyDisplayTime) const
+ {
+@@ -1126,7 +1134,7 @@ void UAnimSequenceBase::HandleAssetPlayerTickedInternal(FAnimAssetTickContext &C
+ 	NotifyQueue.AddAnimNotifies(Context.ShouldGenerateNotifies(), NotifyContext.ActiveNotifies, Instance.EffectiveBlendWeight);
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ void UAnimSequenceBase::OnModelModified(const EAnimDataModelNotifyType& NotifyType, IAnimationDataModel* Model, const FAnimDataModelNotifPayload& Payload)
+ {
+ 	NotifyCollector.Handle(NotifyType);
+@@ -1439,12 +1447,13 @@ void UAnimSequenceBase::PopulateModel()
+ 	const FRawCurveTracks CurveData = RawCurveData;
+ 	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+ 		
+-	IAnimationDataController::FScopedBracket ScopedBracket(Controller, LOCTEXT("UAnimSequenceBase::PopulateModel_Bracket", "Generating Animation Model Data for Animation Sequence Base"));
++	Controller->OpenBracket(LOCTEXT("UAnimSequenceBase::PopulateModel_Bracket", "Generating Animation Model Data for Animation Sequence Base"));
+ 	Controller->SetFrameRate(FrameRate);
+ 	Controller->SetNumberOfFrames(Controller->ConvertSecondsToFrameNumber(PlayLength));
+ 
+ 	USkeleton* TargetSkeleton = GetSkeleton();	
+-	UE::Anim::CopyCurveDataToModel(CurveData, TargetSkeleton,  *Controller);	
++	UE::Anim::CopyCurveDataToModel(CurveData, TargetSkeleton,  *Controller);
++	Controller->CloseBracket();
+ }
+ 
+ void UAnimSequenceBase::PopulateWithExistingModel(TScriptInterface<IAnimationDataModel> ExistingDataModel)
+@@ -1511,9 +1520,10 @@ bool UAnimSequenceBase::ShouldDataModelBeValid() const
+ 
+ #undef LOCTEXT_NAMESPACE 
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ void UAnimSequenceBase::OnEndLoadPackage(const FEndLoadPackageContext& Context)
+ {
++#if WITH_EDITOR
+ 	if (!GetPackage()->GetHasBeenEndLoaded())
+ 	{
+ 		return;
+@@ -1522,10 +1532,12 @@ void UAnimSequenceBase::OnEndLoadPackage(const FEndLoadPackageContext& Context)
+ 	FCoreUObjectDelegates::OnEndLoadPackage.RemoveAll(this);
+ 
+ 	OnAnimModelLoaded();
++#endif // WITH_EDITOR
+ }
+ 
+ void UAnimSequenceBase::OnAnimModelLoaded()
+ {
++#if WITH_EDITOR
+ 	QUICK_SCOPE_CYCLE_COUNTER(STAT_OnAnimModelLoaded);
+ 	if(USkeleton* MySkeleton = GetSkeleton())
+ 	{		
+@@ -1539,5 +1551,6 @@ void UAnimSequenceBase::OnAnimModelLoaded()
+ 			}
+ 		}
+ 	}
++#endif // WITH_EDITOR
+ }
+-#endif // WITH_EDITOR
+\ No newline at end of file
++#endif // WITH_EDITORONLY_DATA
+diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceHelpers.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceHelpers.cpp
+index 01a396894..6e5058fb6 100644
+--- a/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceHelpers.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimSequenceHelpers.cpp
+@@ -53,6 +53,9 @@ void BuildPoseFromModel(const IAnimationDataModel* Model, FAnimationPoseData& Ou
+ 	Model->Evaluate(OutPoseData, EvaluationContext);
+ }
+ 
++#endif
++
++#if WITH_EDITORONLY_DATA
+ void EvaluateFloatCurvesFromModel(const IAnimationDataModel* Model, FBlendedCurve& OutCurves, double Time)
+ {
+ 	check(Model);
+@@ -74,6 +77,9 @@ void EvaluateFloatCurvesFromModel(const IAnimationDataModel* Model, FBlendedCurv
+ 	UE::Anim::FCurveUtils::BuildUnsorted(OutCurves, NumCurves, GetNameFromIndex, GetValueFromIndex, OutCurves.GetFilter());
+ }
+ 
++#endif // WITH_EDITORONLY_DATA
++
++#if WITH_EDITOR
+ void EvaluateTransformCurvesFromModel(const IAnimationDataModel* Model, TMap<FName, FTransform>& OutCurves, double Time, float BlendWeight)
+ {
+ 	if (Model)
+@@ -120,10 +126,13 @@ void GetBoneTransformFromModel(const IAnimationDataModel* Model, FTransform& Out
+ 			break;
+ 		}
+ 	}
+-}
++	}
++#endif // WITH_EDITOR
+ 
++#if WITH_EDITORONLY_DATA
+ void CopyCurveDataToModel(const FRawCurveTracks& CurveData, const USkeleton* Skeleton, IAnimationDataController& Controller)
+ {
++#if WITH_EDITOR
+ 	// Populate float curve data
+ 	for (const FFloatCurve& FloatCurve : CurveData.FloatCurves)
+ 	{
+@@ -164,8 +173,9 @@ void CopyCurveDataToModel(const FRawCurveTracks& CurveData, const USkeleton* Ske
+ 			}
+ 		}
+ 	}
+-}
+ #endif // WITH_EDITOR
++}
++#endif // WITH_EDITORONLY_DATA
+  
+  
+  void ExtractBoneTransform(const FRawAnimSequenceTrack& RawTrack, FTransform& OutTransform, int32 KeyIndex)

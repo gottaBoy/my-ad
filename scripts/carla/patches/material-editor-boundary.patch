@@ -1,162 +1,706 @@
-diff --git a/Engine/Source/Runtime/Engine/Classes/Engine/StaticMesh.h b/Engine/Source/Runtime/Engine/Classes/Engine/StaticMesh.h
-index e09b7142f..3512fc7f5 100644
---- a/Engine/Source/Runtime/Engine/Classes/Engine/StaticMesh.h
-+++ b/Engine/Source/Runtime/Engine/Classes/Engine/StaticMesh.h
-@@ -1660,7 +1660,6 @@ public:
- 	ENGINE_API const FMeshSectionInfoMap& GetSectionInfoMap() const;
- 	ENGINE_API FMeshSectionInfoMap& GetOriginalSectionInfoMap();
- 	ENGINE_API const FMeshSectionInfoMap& GetOriginalSectionInfoMap() const;
--
- 	ENGINE_API bool IsAsyncTaskComplete() const;
- 	
- 	/** Try to cancel any pending async tasks.
-diff --git a/Engine/Source/Runtime/Engine/Private/StaticMesh.cpp b/Engine/Source/Runtime/Engine/Private/StaticMesh.cpp
-index 861258289..1d004584a 100644
---- a/Engine/Source/Runtime/Engine/Private/StaticMesh.cpp
-+++ b/Engine/Source/Runtime/Engine/Private/StaticMesh.cpp
-@@ -2571,6 +2571,7 @@ static float CalculateViewDistance(float MaxDeviation, float AllowedPixelError)
- 	return ViewDistance;
- }
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp b/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp
+index a5ef70be1..c0680271a 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp
+@@ -382,6 +382,7 @@ void FMaterialResource::GetStaticParameterSet(EShaderPlatform Platform, FStaticP
+ 	FMaterial::GetStaticParameterSet(Platform, OutSet);
  
+ 	// Get the set from instance
 +#if WITH_EDITOR
- void FStaticMeshRenderData::ResolveSectionInfo(UStaticMesh* Owner)
- {
- 	int32 LODIndex = 0;
-@@ -2647,8 +2648,9 @@ void FStaticMeshRenderData::ResolveSectionInfo(UStaticMesh* Owner)
- 		ScreenSize[LODIndex].Default = 0.0f;
- 	}
- }
-+#endif // WITH_EDITOR
- 
--void FStaticMeshRenderData::SyncUVChannelData(const TArray<FStaticMaterial>& ObjectData)
-+ENGINE_API void FStaticMeshRenderData::SyncUVChannelData(const TArray<FStaticMaterial>& ObjectData)
- {
- 	TUniquePtr< TArray<FMeshUVChannelInfo> > UpdateData = MakeUnique< TArray<FMeshUVChannelInfo> >();
- 	UpdateData->Empty(ObjectData.Num());
-@@ -3925,8 +3927,10 @@ UStaticMesh::UStaticMesh(const FObjectInitializer& ObjectInitializer)
- 	bAutoComputeLODScreenSize=true;
- 	ImportVersion = EImportStaticMeshVersion::BeforeImportStaticMeshVersionWasAdded;
- 	NumStreamedLODs.Default = -1;
-+#if WITH_EDITOR
- 	GetHiResSourceModel().StaticMeshDescriptionBulkData = CreateDefaultSubobject<UStaticMeshDescriptionBulkData>(TEXT("HiResMeshDescription"));
- 	GetHiResSourceModel().StaticMeshDescriptionBulkData->SetFlags(RF_Transactional);
-+#endif
- 	SetLegacyTangentScaling(false);
- #endif // #if WITH_EDITORONLY_DATA
- 	SetLightMapResolution(4);
-@@ -5337,7 +5341,7 @@ bool UStaticMesh::IsReadyForFinishDestroy()
- 
- int32 UStaticMesh::GetNumSectionsWithCollision() const
- {
--#if WITH_EDITORONLY_DATA
-+#if WITH_EDITOR
- 	int32 NumSectionsWithCollision = 0;
- 
- 	if (GetRenderData() && GetRenderData()->LODResources.Num() > 0)
-@@ -6463,10 +6467,15 @@ void UStaticMesh::Serialize(FArchive& Ar)
- 		SourceFileTimestamp_DEPRECATED = TEXT("");
- 	}
- 
-+	#if WITH_EDITOR
- 	if (Ar.IsLoading() && Ar.CustomVer(FRenderingObjectVersion::GUID) < FRenderingObjectVersion::DistanceFieldSelfShadowBias)
+ 	if (MaterialInstance)
  	{
- 		DistanceFieldSelfShadowBias = GetSourceModel(0).BuildSettings.DistanceFieldBias_DEPRECATED * 10.0f;
+ 		MaterialInstance->GetStaticParameterValues(OutSet);
+@@ -390,6 +391,7 @@ void FMaterialResource::GetStaticParameterSet(EShaderPlatform Platform, FStaticP
+ 	{
+ 		Material->GetStaticParameterValues(OutSet);
  	}
 +#endif
+ }
+ #endif // WITH_EDITORONLY_DATA
+ 
+@@ -2103,6 +2105,10 @@ TOptional<UMaterial::FLayersInterfaces> UMaterial::GetExpressionLayers(const UMa
+ 	return {};
+ }
+ 
 +#endif // WITH_EDITORONLY_DATA
 +
 +#if WITH_EDITOR
- 
- 	if (Ar.IsLoading() && Ar.CustomVer(FRenderingObjectVersion::GUID) < FRenderingObjectVersion::NaniteFallbackTarget)
- 	{
-@@ -6481,11 +6490,11 @@ void UStaticMesh::Serialize(FArchive& Ar)
++
+ void UMaterial::UpdateTransientExpressionData()
+ {
+ 	for (UMaterialExpression* Expression : GetExpressions())
+@@ -2116,10 +2122,6 @@ void UMaterial::UpdateTransientExpressionData()
  	}
+ }
  
- 	if (Ar.CustomVer(FEditorObjectVersion::GUID) >= FEditorObjectVersion::RefactorMeshEditorMaterials)
 -#endif // WITH_EDITORONLY_DATA
-+#endif // WITH_EDITOR
+-
+-#if WITH_EDITOR
+-
+ static FSubstrateMaterialInfo GetSubstrateMaterialInfo(UMaterialEditorOnlyData* EditorOnly)
+ {
+ 	FSubstrateMaterialInfo Out;
+@@ -2229,7 +2231,7 @@ bool UMaterial::GetMaterialLayers(FMaterialLayersFunctions& OutLayers, TMicRecur
+ 	if (CachedExpressionData && CachedExpressionData->bHasMaterialLayers)
  	{
- 		Ar << GetStaticMaterials();
- 	}
+ 		OutLayers.GetRuntime() = CachedExpressionData->MaterialLayers;
 -#if WITH_EDITORONLY_DATA
 +#if WITH_EDITOR
- 	else if (Ar.IsLoading())
- 	{
- 		TArray<UMaterialInterface*> Unique_Materials_DEPRECATED;
-@@ -6514,7 +6523,7 @@ void UStaticMesh::Serialize(FArchive& Ar)
- 		Materials_DEPRECATED.Empty();
+ 		if (CachedExpressionData->EditorOnlyData)
+ 		{
+ 			// cooked materials can strip out material layer information
+@@ -2243,7 +2245,7 @@ bool UMaterial::GetMaterialLayers(FMaterialLayersFunctions& OutLayers, TMicRecur
+ 				return false;
+ 			}
+ 		}
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 		return true;
+ 	}
+ 	return false;
+@@ -3000,7 +3002,7 @@ void UMaterial::Serialize(FArchive& Ar)
+ 	}
+ #endif
  
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	if (MaterialDomain == MD_Volume && Ar.IsLoading() && Ar.CustomVer(FRenderingObjectVersion::GUID) < FRenderingObjectVersion::VolumeExtinctionBecomesRGB)
+ 	{
+ 		// Note: we work on _DEPRECATED data because that will be used later to create the EditorOnly data in PostLoad().
+@@ -3017,7 +3019,7 @@ void UMaterial::Serialize(FArchive& Ar)
+ 			ReleaseResourcesAndMutateDDCKey(VolumeExtinctionBecomesRGBConversionGuid);
+ 		}
  	}
 -#endif // WITH_EDITORONLY_DATA
 +#endif // WITH_EDITOR
  
+ 	if (Ar.IsLoading() && Ar.CustomVer(FUE5MainStreamObjectVersion::GUID) < FUE5MainStreamObjectVersion::MaterialTranslucencyPass)
+ 	{
+@@ -4026,6 +4028,7 @@ bool UMaterial::ConvertMaterialToSubstrateMaterial(bool bAllowEmptyMaterialUpdat
+ 
+ TMap<FGuid, UMaterialInterface*> LightingGuidFixupMap;
+ 
++#if WITH_EDITOR
+ template<typename InputType>
+ static void MoveExpressionInput(InputType& Src, InputType& OutDst)
+ {
+@@ -4034,6 +4037,7 @@ static void MoveExpressionInput(InputType& Src, InputType& OutDst)
+ 		OutDst = MoveTemp(Src);
+ 	}
+ }
++#endif
+ 
+ void UMaterial::PostLoad()
+ {
+@@ -4061,7 +4065,7 @@ void UMaterial::PostLoad()
+ 
+ 	NaniteOverrideMaterial.FixupLegacySoftReference(this);
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	const FPackageFileVersion UEVer = GetLinkerUEVersion();
+ 	const int32 RenderObjVer = GetLinkerCustomVersion(FRenderingObjectVersion::GUID);
+ 	const int32 UE5MainVer = GetLinkerCustomVersion(FUE5MainStreamObjectVersion::GUID);
+@@ -4313,9 +4317,6 @@ void UMaterial::PostLoad()
+ #endif
+ 	}
+ 
+-#endif // WITH_EDITOR
+-
+-#if WITH_EDITORONLY_DATA
+ 	if (MaterialDomain == MD_Volume && UE5MainVer < FUE5MainStreamObjectVersion::MaterialHasIsUsedWithVolumetricCloudFlag)
+ 	{
+ 		bUsedWithVolumetricCloud = HasAnyExpressionsInMaterialAndFunctionsOfType<UMaterialExpressionCloudSampleAttribute>()
+@@ -4327,7 +4328,7 @@ void UMaterial::PostLoad()
+ 			ReleaseResourcesAndMutateDDCKey(BackwardsCompatibilityUsedWithVolumetricCloudConversionGuid);
+ 		}
+ 	}
+-#endif
++#endif // WITH_EDITOR
  
  #if WITH_EDITOR
-@@ -6553,7 +6562,7 @@ void UStaticMesh::Serialize(FArchive& Ar)
+ 	if (Substrate::IsSubstrateEnabled())
+@@ -4342,7 +4343,11 @@ void UMaterial::PostLoad()
  	}
  #endif // WITH_EDITOR
  
+-	checkf(CachedExpressionData, TEXT("Missing cached expression data for material, should have been either serialized or created during PostLoad"));
++	if (!CachedExpressionData)
++	{
++		// Non-editor programs (WITH_EDITOR=0) cannot rebuild cached expression data; fall back to an empty entry.
++		CachedExpressionData.Reset(new FMaterialCachedExpressionData());
++	}
+ 
+ 	for (const FMaterialParameterCollectionInfo& CollectionInfo : CachedExpressionData->ParameterCollectionInfos)
+ 	{
+@@ -7572,7 +7577,7 @@ bool UMaterial::IsPropertyActiveInDerived(EMaterialProperty InProperty, const UM
+ 		IsPropertySupported(InProperty));
+ }
+ 
 -#if WITH_EDITORONLY_DATA
 +#if WITH_EDITOR
- 	if (Ar.IsLoading() && Ar.CustomVer(FFortniteMainBranchObjectVersion::GUID) < FFortniteMainBranchObjectVersion::FixedTangentTransformForNonuniformBuildScale)
- 	{
- 		bool bHasNonUniformSourceModel = false;
-@@ -8171,8 +8180,8 @@ bool UStaticMesh::ContainsPhysicsTriMeshDataCheckComplex(bool bInUseAllTriData,
- 
- bool UStaticMesh::SectionHasCollisionEnabled(const FStaticMeshSection& Section, int32 LODIndex, int32 SectionIndex) const
+ void UMaterial::FlipExpressionPositions(TConstArrayView<TObjectPtr<UMaterialExpression>> Expressions, TConstArrayView<TObjectPtr<UMaterialExpressionComment>> Comments, bool bScaleCoords, UMaterial* InMaterial)
  {
--#if WITH_EDITORONLY_DATA
--	// we can only use GetSectionInfoMap() in WITH_EDITORONLY_DATA mode
-+#if WITH_EDITOR
-+	// The section info map is only exposed in editor builds.
- 	return GetSectionInfoMap().Get(LODIndex, SectionIndex).bEnableCollision;
- #else // #if WITH_EDITORONLY_DATA
- 	return Section.bEnableCollision;
-@@ -8460,14 +8469,14 @@ void UStaticMesh::EnforceLightmapRestrictions(bool bUseRenderData)
- 	// Lightmass only supports 4 UVs from Lightmass::MAX_TEXCOORDS
- 	int32 NumUVs = 4;
+ 	// Rough estimate of average increase in node size for the new editor
+@@ -7664,7 +7669,7 @@ bool UMaterial::FixFeatureLevelNodesForSM6(TArray<UMaterialExpression*> const& I
+ 	return bRequiredChange;
+ }
  
--#if !WITH_EDITORONLY_DATA
-+#if !WITH_EDITOR
- 	if (!bUseRenderData)
- 	{
- 		//The source models are only available in the editor, fallback on the render data.
- 		UE_ASSET_LOG(LogStaticMesh, Warning, this, TEXT("Trying to enforce lightmap restrictions using the static mesh SourceModels outside of the Editor."))
- 		bUseRenderData = true;
- 	}
 -#endif //WITH_EDITORONLY_DATA
 +#endif //WITH_EDITOR
  
- 	if (bUseRenderData)
- 	{
-@@ -8487,7 +8496,7 @@ void UStaticMesh::EnforceLightmapRestrictions(bool bUseRenderData)
- 			NumUVs = 1;
- 		}
- 	}
+ void UMaterial::GetLightingGuidChain(bool bIncludeTextures, TArray<FGuid>& OutGuids) const
+ {
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressions.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressions.cpp
+index 7c0dc740f..ebe703056 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressions.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialExpressions.cpp
+@@ -11,6 +11,7 @@
+ #include "UObject/UE5MainStreamObjectVersion.h"
+ #include "Internationalization/LocKeyFuncs.h"
+ #include "UObject/NaniteResearchStreamObjectVersion.h"
++#include "UObject/Package.h"
+ #include "Materials/MaterialExpressionChannelMaskParameterColor.h"
+ #include "UObject/UObjectAnnotation.h"
+ #include "RenderUtils.h"
+@@ -943,7 +944,7 @@ void UMaterialExpression::Serialize(FStructuredArchive::FRecord Record)
+ 	Archive.UsingCustomVersion(FRenderingObjectVersion::GUID);
+ 	Archive.UsingCustomVersion(FUE5MainStreamObjectVersion::GUID);
+ 
 -#if WITH_EDITORONLY_DATA
 +#if WITH_EDITOR
- 	else
+ 	const FPackageFileVersion UEVer = Archive.UEVer();
+ 	const int32 RenderVer = Archive.CustomVer(FRenderingObjectVersion::GUID);
+ 	const int32 UE5Ver = Archive.CustomVer(FUE5MainStreamObjectVersion::GUID);
+@@ -952,7 +953,7 @@ void UMaterialExpression::Serialize(FStructuredArchive::FRecord Record)
  	{
- 		for (int32 LODIndex = 0; LODIndex < GetNumSourceModels(); ++LODIndex)
-diff --git a/Engine/Source/Runtime/Engine/Public/StaticMeshResources.h b/Engine/Source/Runtime/Engine/Public/StaticMeshResources.h
-index 11186cf75..4185f8b09 100644
---- a/Engine/Source/Runtime/Engine/Public/StaticMeshResources.h
-+++ b/Engine/Source/Runtime/Engine/Public/StaticMeshResources.h
-@@ -459,7 +459,7 @@ public:
- 	uint32 StaticMeshIndexMemory;
- #endif
+ 		DoMaterialAttributeReorder(It.Input, UEVer, RenderVer, UE5Ver);
+ 	}
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ }
+ 
+ void UMaterialExpression::PostInitProperties()
+@@ -983,7 +984,7 @@ void UMaterialExpression::PostLoad()
+ 	
+ 	UpdateMaterialExpressionGuid(false, false);
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	TArray<FExpressionExecOutputEntry> ExecOutputs;
+ 	GetExecOutputs(ExecOutputs);
+ 	for (const FExpressionExecOutputEntry& Output : ExecOutputs)
+@@ -995,7 +996,7 @@ void UMaterialExpression::PostLoad()
+ 			ConnectedExpression->NumExecutionInputs++;
+ 		}
+ 	}
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ }
+ 
+ void UMaterialExpression::PostDuplicate(bool bDuplicateForPIE)
+@@ -3052,7 +3053,7 @@ UMaterialExpressionRuntimeVirtualTextureOutput::UMaterialExpressionRuntimeVirtua
+ 
+ #if WITH_EDITORONLY_DATA
+ 	MenuCategories.Add(ConstructorStatics.NAME_VirtualTexture);
+-#endif
++#endif // WITH_EDITOR
+ 
+ #if WITH_EDITOR
+ 	Outputs.Reset();
+@@ -4093,7 +4094,7 @@ UMaterialExpressionAdd::UMaterialExpressionAdd(const FObjectInitializer& ObjectI
+ UMaterialExpressionTextureSampleParameter::UMaterialExpressionTextureSampleParameter(const FObjectInitializer& ObjectInitializer)
+ 	: Super(ObjectInitializer)
+ {
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	// Structure to hold one-time initialization
+ 	struct FConstructorStatics
+ 	{
+@@ -8473,9 +8474,9 @@ void UMaterialExpressionMaterialAttributeLayers::PostLoad()
+ 		}
+ 	}
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	RebuildLayerGraph(false);
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ }
+ 
+ #if WITH_EDITOR
+@@ -9701,7 +9702,7 @@ void UMaterialExpressionParameter::ValidateParameterName(const bool bAllowDuplic
+ UMaterialExpressionVectorParameter::UMaterialExpressionVectorParameter(const FObjectInitializer& ObjectInitializer)
+ 	: Super(ObjectInitializer)
+ {
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	Outputs.Reset();
+ 	Outputs.Add(FExpressionOutput(TEXT(""), 1, 1, 1, 1, 0));
+ 	Outputs.Add(FExpressionOutput(TEXT(""), 1, 1, 0, 0, 0));
+@@ -10408,7 +10409,7 @@ UMaterialExpressionStaticBool::UMaterialExpressionStaticBool(const FObjectInitia
+ 	MenuCategories.Add(ConstructorStatics.NAME_Functions);
+ 
+ 	bShaderInputData = true;
+-#endif
++#endif // WITH_EDITOR
+ }
+ 
+ #if WITH_EDITOR
+@@ -11882,7 +11883,7 @@ UMaterialExpressionDynamicParameter::UMaterialExpressionDynamicParameter(const F
+ 
+ 	bShowOutputNameOnPin = true;
+ 	bHidePreviewWindow = true;
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 
+ 	ParamNames.Add(TEXT("Param1"));
+ 	ParamNames.Add(TEXT("Param2"));
+@@ -14987,7 +14988,7 @@ void UMaterialExpressionObjectBounds::GetCaption(TArray<FString>& OutCaptions) c
+ UMaterialExpressionObjectLocalBounds::UMaterialExpressionObjectLocalBounds(const FObjectInitializer& ObjectInitializer)
+ 	: Super(ObjectInitializer)
+ {
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	// Structure to hold one-time initialization
+ 	struct FConstructorStatics
+ 	{
+@@ -15057,7 +15058,7 @@ void UMaterialExpressionObjectLocalBounds::GetExpressionToolTip(TArray<FString>&
+ UMaterialExpressionBounds::UMaterialExpressionBounds(const FObjectInitializer& ObjectInitializer)
+ 	: Super(ObjectInitializer)
+ {
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	// Structure to hold one-time initialization
+ 	struct FConstructorStatics
+ 	{
+@@ -15150,7 +15151,7 @@ void UMaterialExpressionBounds::GetExpressionToolTip(TArray<FString>& OutToolTip
+ UMaterialExpressionPreSkinnedLocalBounds::UMaterialExpressionPreSkinnedLocalBounds(const FObjectInitializer& ObjectInitializer)
+ 	: Super(ObjectInitializer)
+ {
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	// Structure to hold one-time initialization
+ 	struct FConstructorStatics
+ 	{
+@@ -17759,8 +17760,10 @@ bool UMaterialFunction::IsDependent(UMaterialFunctionInterface* OtherFunction)
+ 		if (MaterialFunctionExpression && MaterialFunctionExpression->MaterialFunction)
+ 		{
+ 			// Recurse to handle nesting
+-			bIsDependent = bIsDependent 
++			bIsDependent = bIsDependent
++#if WITH_EDITOR
+ 				|| MaterialFunctionExpression->MaterialFunction->GetReentrantFlag()
++#endif
+ 				|| MaterialFunctionExpression->MaterialFunction->IsDependent(OtherFunction);
+ 		}
+ 	}
+@@ -17787,7 +17790,7 @@ bool UMaterialFunction::IterateDependentFunctions(TFunctionRef<bool(UMaterialFun
+ 		}
+ 	}
+ #else
+-	for (UMaterialExpression* CurrentExpression : FunctionExpressions)
++	for (UMaterialExpression* CurrentExpression : GetExpressions())
+ 	{
+ 		if (UMaterialExpressionMaterialFunctionCall* MaterialFunctionExpression = Cast<UMaterialExpressionMaterialFunctionCall>(CurrentExpression))
+ 		{
+@@ -17809,7 +17812,7 @@ void UMaterialFunction::GetDependentFunctions(TArray<UMaterialFunctionInterface*
+ 		return true;
+ 	});
+ }
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 
+ #if WITH_EDITOR
+ bool UMaterialFunction::HasFlippedCoordinates() const
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialInstance.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialInstance.cpp
+index 78ce1a1fc..a48291824 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialInstance.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialInstance.cpp
+@@ -1114,11 +1114,11 @@ bool UMaterialInstance::GetParameterOverrideValue(EMaterialParameterType Type, c
+ 	case EMaterialParameterType::SparseVolumeTexture: bResult = GameThread_GetParameterValue(SparseVolumeTextureParameterValues, ParameterInfo, OutResult); break;
+ 	case EMaterialParameterType::Font: bResult = GameThread_GetParameterValue(FontParameterValues, ParameterInfo, OutResult); break;
+ 	case EMaterialParameterType::StaticSwitch: bResult = GameThread_GetParameterValue(StaticParametersRuntime.StaticSwitchParameters, ParameterInfo, OutResult); break;
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	case EMaterialParameterType::StaticComponentMask:
+ 		bResult = GameThread_GetParameterValue(GetEditorOnlyData()->StaticParameters.StaticComponentMaskParameters, ParameterInfo, OutResult);
+ 		break;
+-#endif // WITH_EDITORONLY_DATA
++	#endif // WITH_EDITOR
+ 	default: checkNoEntry(); break;
+ 	}
+ 	return bResult;
+@@ -1150,7 +1150,7 @@ bool UMaterialInstance::GetParameterValue(EMaterialParameterType Type, const FMe
+ 		{
+ 			if (Instance->GetParameterOverrideValue(Type, CurrentParameterInfo, OutResult))
+ 			{
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 				if (ParentIndex == 0)
+ 				{
+ 					// If value was set on this instance, set the override flag
+@@ -2097,7 +2097,7 @@ UMaterialInterface* UMaterialInstance::GetNaniteOverride(TMicRecursionGuard Recu
+ 	}
+ }
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 
+ void UMaterialInstance::SetStaticSwitchParameterValueEditorOnly(const FMaterialParameterInfo& ParameterInfo, bool Value)
+ {
+@@ -2164,7 +2164,7 @@ void UMaterialInterface::GetStaticParameterValues(FStaticParameterSet& OutStatic
+ 		CachedStaticParameterValues = OutStaticParameters;
+ 	}
+ }
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 
+ void UMaterialInstance::GetAllParametersOfType(EMaterialParameterType Type, TMap<FMaterialParameterInfo, FMaterialParameterMetadata>& OutParameters) const
+ {
+@@ -2204,7 +2204,7 @@ void UMaterialInstance::GetAllParametersOfType(EMaterialParameterType Type, TMap
+ 		case EMaterialParameterType::StaticComponentMask:
+ 			GameThread_ApplyParameterOverrides(Instance->GetEditorOnlyData()->StaticParameters.StaticComponentMaskParameters, LayerIndexRemap, bSetOverride, OverridenParameters, OutParameters);
+ 			break;
+-#endif // WITH_EDITORONLY_DATA
++	#endif // WITH_EDITOR
+ 		default: checkNoEntry();
+ 		}
+ 
+@@ -2265,7 +2265,7 @@ void UMaterialInstance::GetDependentFunctions(TArray<UMaterialFunctionInterface*
+ 			return true;
+ 		});
+ }
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 
+ #if WITH_EDITOR
+ void UMaterialInstance::ForceRecompileForRendering(EMaterialShaderPrecompileMode CompileMode)
+@@ -2279,13 +2279,13 @@ void UMaterialInstance::InitStaticPermutation(EMaterialShaderPrecompileMode Prec
+ {
+ 	UpdateOverridableBaseProperties();
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	if (!GetPackage()->HasAnyPackageFlags(PKG_FilterEditorOnly))
+ 	{
+ 		bHasStaticPermutationResource = Parent && (HasStaticParameters() || HasOverridenBaseProperties());
+ 		ValidateStaticPermutationAllowed();
+ 	}
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 
+ 	FMaterialResourceDeferredDeletionArray ResourcesToFree;
+ 
+@@ -2806,8 +2806,8 @@ bool UMaterialInstance::GetMaterialLayers(FMaterialLayersFunctions& OutLayers, T
+ 	if (StaticParametersRuntime.bHasMaterialLayers)
+ 	{
+ 		OutLayers.GetRuntime() = StaticParametersRuntime.MaterialLayers;
+-#if WITH_EDITORONLY_DATA
+-		const UMaterialInstanceEditorOnlyData* EditorOnly = GetEditorOnlyData();
++#if WITH_EDITOR
++			const UMaterialInstanceEditorOnlyData* EditorOnly = GetEditorOnlyData();
+ 
+ 		// cooked materials can strip out material layer information
+ 		if (EditorOnly && EditorOnly->StaticParameters.MaterialLayers.LayerStates.Num() != 0)
+@@ -2819,7 +2819,7 @@ bool UMaterialInstance::GetMaterialLayers(FMaterialLayersFunctions& OutLayers, T
+ 		{
+ 			return false;
+ 		}
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 		return true;
+ 	}
+ 
+@@ -3127,7 +3127,7 @@ void UMaterialInstance::Serialize(FArchive& Ar)
+ 		bSavedCachedData_DEPRECATED = false;
+ 		bSavedCachedData = true;
+ 	}
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 
+ #if !WITH_EDITORONLY_DATA
+ 	ensureMsgf(!Ar.IsLoading() || bSavedCachedData || bAllowMissingCachedData, TEXT("MaterialInstance %s must have saved cached data, if editor-only data is not present"), *GetName());
+@@ -3738,7 +3738,7 @@ bool UMaterialInstance::SetVectorParameterByIndexInternal(int32 ParameterIndex,
+ 	return true;
+ }
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ FMaterialInstanceParameterUpdateContext::FMaterialInstanceParameterUpdateContext(UMaterialInstance* InInstance, EMaterialInstanceClearParameterFlag InFlags)
+ 	: Instance(InInstance)
+ 	, bForceStaticPermutationUpdate(false)
+@@ -3795,7 +3795,7 @@ void FMaterialInstanceParameterUpdateContext::SetMaterialLayers(const FMaterialL
+ 	StaticParameters.EditorOnly.MaterialLayers = InValue.EditorOnly;
+ 	StaticParameters.Validate();
+ }
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 
+ void UMaterialInstance::ReserveParameterValuesInternal(EMaterialParameterType Type, int32 Capacity)
+ {
+@@ -3828,7 +3828,7 @@ void UMaterialInstance::AddParameterValueInternal(const FMaterialParameterInfo&
+ 			AtlasData.Atlas = Meta.ScalarAtlas;
+ 			AtlasData.Curve = Meta.ScalarCurve;
+ 		}
+-#endif // WITH_EDITORONLY_DATA
++	#endif // WITH_EDITOR
+ 		ScalarParameterValues.Emplace(ParameterInfo, Value.AsScalar(), AtlasData);
+ 		break;
+ 	case EMaterialParameterType::Vector: VectorParameterValues.Emplace(ParameterInfo, Value.AsLinearColor()); break;
+@@ -3858,7 +3858,7 @@ void UMaterialInstance::SetParameterValueInternal(const FMaterialParameterInfo&
+ 			AtlasData.Atlas = Meta.ScalarAtlas;
+ 			AtlasData.Curve = Meta.ScalarCurve;
+ 		}
+-#endif // WITH_EDITORONLY_DATA
++	#endif // WITH_EDITOR
+ 		SetScalarParameterValueInternal(ParameterInfo, Value.AsScalar(), bUseAtlas, AtlasData);
+ 		break;
+ 	case EMaterialParameterType::Vector: SetVectorParameterValueInternal(ParameterInfo, Value.AsLinearColor()); break;
+@@ -4235,8 +4235,8 @@ void UMaterialInstance::ClearParameterValuesInternal(EMaterialInstanceClearParam
+ 	if (EnumHasAnyFlags(Flags, EMaterialInstanceClearParameterFlag::Static))
+ 	{
+ 		StaticParametersRuntime.Empty();
+-#if WITH_EDITORONLY_DATA
+-		UMaterialInstanceEditorOnlyData* EditorOnly = GetEditorOnlyData();
++#if WITH_EDITOR
++			UMaterialInstanceEditorOnlyData* EditorOnly = GetEditorOnlyData();
+ 		if (EditorOnly)
+ 		{
+ 			EditorOnly->StaticParameters.Empty();
+@@ -5579,4 +5579,4 @@ bool UMaterialInstance::GetTextureCollectionParameterValue(const FHashedMaterial
+ {
+ 	bool bResult = Super::GetTextureCollectionParameterValue(ParameterInfo, OutValue, bOveriddenOnly);
+ 	return bResult;
+-}
+\ No newline at end of file
++}
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialInterface.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialInterface.cpp
+index 7b436279f..ede317957 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialInterface.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialInterface.cpp
+@@ -46,7 +46,7 @@
+ #include "ShaderCompiler.h"
+ #include "Materials/MaterialInsights.h"
  
 -#if WITH_EDITOR
 +#if WITH_EDITORONLY_DATA
- 	FByteBulkData BulkData;
+ #include "ObjectCacheEventSink.h"
+ #include "MaterialCachedHLSLTree.h"
+ #endif
+@@ -145,7 +145,7 @@ namespace UE::MaterialInterface
+ 	}
+ }
  
- 	FString DerivedDataKey;
-@@ -809,7 +809,7 @@ public:
- 	/** Estimate of compressed size of Nanite streaming data. */
- 	uint64 EstimatedNaniteStreamingCompressedSize = 0;
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
  
--	void SyncUVChannelData(const TArray<FStaticMaterial>& ObjectData);
-+	ENGINE_API void SyncUVChannelData(const TArray<FStaticMaterial>& ObjectData);
+ UMaterialInterface::UMaterialInterface() = default;
  
+@@ -400,7 +400,7 @@ void UMaterialInterface::GetUsedTexturesAndIndices(TArray<UTexture*>& OutTexture
+ 	OutIndices.AddDefaulted(OutTextures.Num());
+ }
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ bool UMaterialInterface::GetStaticSwitchParameterValue(const FHashedMaterialParameterInfo& ParameterInfo, bool& OutValue, FGuid& OutExpressionGuid, bool bOveriddenOnly /*= false*/) const
+ {
+ 	FMaterialParameterMetadata Result;
+@@ -427,7 +427,7 @@ bool UMaterialInterface::GetStaticComponentMaskParameterValue(const FHashedMater
+ 	}
+ 	return false;
+ }
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 
+ FMaterialRelevance UMaterialInterface::GetRelevance_Internal(const UMaterial* Material, ERHIFeatureLevel::Type InFeatureLevel) const
+ {
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/MaterialShared.cpp b/Engine/Source/Runtime/Engine/Private/Materials/MaterialShared.cpp
+index e38caa429..39c5a5768 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/MaterialShared.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/MaterialShared.cpp
+@@ -917,14 +917,6 @@ bool FMaterial::IsRequiredComplete() const
+ }
+ 
+ #if WITH_EDITOR
+-void FMaterial::AddShaderMapIDsWithUnfinishedCompilation(TArray<int32>& ShaderMapIds)
+-{
+-	if (GameThreadCompilingShaderMapId != 0u && GShaderCompilingManager->IsCompilingShaderMap(GameThreadCompilingShaderMapId))
+-	{
+-		ShaderMapIds.Add(GameThreadCompilingShaderMapId);
+-	}
+-}
+-
+ bool FMaterial::IsCompilationFinished() const
+ {
+ 	if (CacheShadersPending.IsValid() && !CacheShadersPending->IsReady())
+@@ -940,6 +932,16 @@ bool FMaterial::IsCompilationFinished() const
+ 	}
+ 	return true;
+ }
++#endif
++
++#if WITH_EDITOR
++void FMaterial::AddShaderMapIDsWithUnfinishedCompilation(TArray<int32>& ShaderMapIds)
++{
++	if (GameThreadCompilingShaderMapId != 0u && GShaderCompilingManager->IsCompilingShaderMap(GameThreadCompilingShaderMapId))
++	{
++		ShaderMapIds.Add(GameThreadCompilingShaderMapId);
++	}
++}
+ 
+ void FMaterial::CancelCompilation()
+ {
+@@ -3014,7 +3016,7 @@ bool FMaterial::CacheShaders(const FMaterialShaderMapId& ShaderMapId, EShaderPla
+ #endif
+ 			}
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 			FStaticParameterSet StaticParameterSet;
+ 			GetStaticParameterSet(Platform, StaticParameterSet);
+ 
+@@ -4434,7 +4436,7 @@ void FMaterial::GetExpressionIncludesHash(EShaderPlatform Platform, FSHAHash& Ou
+  */
+ bool FMaterial::GetMaterialExpressionSource( FString& OutSource )
+ {
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	const EShaderPlatform ShaderPlatform = GMaxRHIShaderPlatform;
+ 	const ITargetPlatform* TargetPlatform = nullptr;
+ 
+@@ -4534,7 +4536,7 @@ void FMaterial::GetPreshaderStats(uint32& TotalParameters, uint32& TotalOps) con
+ 	TotalParameters = 0;
+ 	TotalOps = 0;
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	const FMaterialShaderMap* ShaderMap = GetGameThreadShaderMap();
+ 	if (ShaderMap)
+ 	{
+@@ -4892,7 +4894,7 @@ int32 UMaterialInterface::CompileProperty(FMaterialCompiler* Compiler, EMaterial
+ 
+ void UMaterialInterface::AnalyzeMaterialProperty(EMaterialProperty InProperty, int32& OutNumTextureCoordinates, bool& bOutRequiresVertexData)
+ {
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	FMaterialAnalysisResult Result;
+ 	AnalyzeMaterialPropertyEx(InProperty, Result);
+ 
+@@ -4903,7 +4905,7 @@ void UMaterialInterface::AnalyzeMaterialProperty(EMaterialProperty InProperty, i
+ 
+ void UMaterialInterface::AnalyzeMaterialPropertyEx(EMaterialProperty InProperty, FMaterialAnalysisResult& OutResult)
+ {
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	AnalyzeMaterialCompilationInCallback([InProperty, this](FMaterialCompiler* Compiler)
+ 	{
+ 		Compiler->SetMaterialProperty(InProperty);
+@@ -4914,7 +4916,7 @@ void UMaterialInterface::AnalyzeMaterialPropertyEx(EMaterialProperty InProperty,
+ 
+ void UMaterialInterface::AnalyzeMaterialCustomOutput(UMaterialExpressionCustomOutput* InCustomOutput, int32 InOutputIndex, FMaterialAnalysisResult& OutResult)
+ {
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	AnalyzeMaterialCompilationInCallback([InCustomOutput, InOutputIndex](FMaterialCompiler* Compiler)
+ 	{
+ 		Compiler->SetMaterialProperty(MP_MAX, InCustomOutput->GetShaderFrequency());
+@@ -4925,7 +4927,7 @@ void UMaterialInterface::AnalyzeMaterialCustomOutput(UMaterialExpressionCustomOu
+ 
+ void UMaterialInterface::AnalyzeMaterialCompilationInCallback(TFunctionRef<void (FMaterialCompiler*)> InCompilationCallback, FMaterialAnalysisResult& OutResult)
+ {
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	// FHLSLMaterialTranslator collects all required information during translation, but these data are protected. Needs to
+ 	// derive own class from it to get access to these data.
+ 	class FMaterialAnalyzer : public FHLSLMaterialTranslator
+@@ -5775,4 +5777,4 @@ FString SceneTextureIdToHLSLString(ESceneTextureId TexId)
+ }
+ #endif // WITH_EDITOR
+ 
+-#undef LOCTEXT_NAMESPACE
+\ No newline at end of file
++#undef LOCTEXT_NAMESPACE
+diff --git a/Engine/Source/Runtime/Engine/Public/MaterialShared.h b/Engine/Source/Runtime/Engine/Public/MaterialShared.h
+index 3b8756b73..eacc7e1a1 100644
+--- a/Engine/Source/Runtime/Engine/Public/MaterialShared.h
++++ b/Engine/Source/Runtime/Engine/Public/MaterialShared.h
+@@ -2275,6 +2275,12 @@ public:
+ 	ENGINE_API bool IsRequiredComplete() const;
+ 
+ #if WITH_EDITOR
++	/**
++	 * Checks if the compilation for this shader is finished
++	 *
++	 * @return returns true if compilation is complete false otherwise
++	 */
++	ENGINE_API bool IsCompilationFinished() const;
  	/**
- 	 * Cache derived renderable data for the static mesh with the provided
+ 	* Called when compilation of an FMaterial finishes, after the GameThreadShaderMap is set and the render command to set the RenderThreadShaderMap is queued
+ 	*/
+@@ -2295,13 +2301,6 @@ public:
+ 	 */
+ 	ENGINE_API static void FinishCompilation(const TCHAR* MaterialName, const TArray<FMaterial*>& MaterialsToCompile);
+ 
+-	/**
+-	 * Checks if the compilation for this shader is finished
+-	 * 
+-	 * @return returns true if compilation is complete false otherwise
+-	 */
+-	ENGINE_API bool IsCompilationFinished() const;
+-
+ 	ENGINE_API virtual const FMaterialCachedHLSLTree* GetCachedHLSLTree() const;
+ 
+ 	/** Should the material be compiled using exec pin? */
+diff --git a/Engine/Source/Runtime/Engine/Public/Materials/Material.h b/Engine/Source/Runtime/Engine/Public/Materials/Material.h
+index e521e437b..20f52ad45 100644
+--- a/Engine/Source/Runtime/Engine/Public/Materials/Material.h
++++ b/Engine/Source/Runtime/Engine/Public/Materials/Material.h
+@@ -1578,10 +1578,10 @@ public:
+ 		return false;
+ 	}
+ 
+-	ENGINE_API void UpdateTransientExpressionData();
+ #endif // WITH_EDITORONLY_DATA
+ 
+ #if WITH_EDITOR
++	ENGINE_API void UpdateTransientExpressionData();
+ 	ENGINE_API void UpdateCachedExpressionData();
+ #endif
+ 
+@@ -1886,7 +1886,7 @@ public:
+ 	// For all materials, UMaterial::CacheResourceShadersForRendering
+ 	ENGINE_API static void AllMaterialsCacheResourceShadersForRendering(bool bUpdateProgressDialog = false, bool bCacheAllRemainingShaders = true);
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	/**
+ 	 * Flip the X coordinates of a material's expressions and space them out more
+ 	 *
+@@ -2080,4 +2080,3 @@ private:
+ };
+ 
+ 
+-
+diff --git a/Engine/Source/Runtime/Engine/Public/Materials/MaterialInterface.h b/Engine/Source/Runtime/Engine/Public/Materials/MaterialInterface.h
+index f7194115b..70d8a3aa3 100644
+--- a/Engine/Source/Runtime/Engine/Public/Materials/MaterialInterface.h
++++ b/Engine/Source/Runtime/Engine/Public/Materials/MaterialInterface.h
+@@ -53,7 +53,7 @@ struct FMaterialResourceLocOnDisk;
+ class FMaterialCachedData;
+ struct FMaterialCachedExpressionData;
+ struct FMaterialCachedExpressionEditorOnlyData;
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ class FMaterialCachedHLSLTree;
+ struct FMaterialResourceForCooking;
+ #endif
+@@ -615,7 +615,7 @@ public:
+ 	}
+ 	virtual FGraphEventArray PrecachePSOs(const FPSOPrecacheVertexFactoryDataList& VertexFactoryDataList, const struct FPSOPrecacheParams& PreCacheParams, EPSOPrecachePriority Priority, TArray<FMaterialPSOPrecacheRequestID>& OutMaterialPSORequestIDs) { return FGraphEventArray(); }
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	/**
+ 	* Builds a composited set of static parameters, including inherited and overridden values
+ 	*/

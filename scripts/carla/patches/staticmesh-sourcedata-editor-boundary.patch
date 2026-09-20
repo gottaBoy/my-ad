@@ -1,0 +1,202 @@
+diff --git a/Engine/Source/Runtime/Engine/Private/StaticMeshSourceData.cpp b/Engine/Source/Runtime/Engine/Private/StaticMeshSourceData.cpp
+index c3e869c49..8775e4533 100644
+--- a/Engine/Source/Runtime/Engine/Private/StaticMeshSourceData.cpp
++++ b/Engine/Source/Runtime/Engine/Private/StaticMeshSourceData.cpp
+@@ -3,6 +3,7 @@
+ #include "Engine/StaticMeshSourceData.h"
+ #include "Engine/StaticMesh.h"
+ #include "Serialization/MemoryReader.h"
++#include "Serialization/BulkData.h"
+ #include "Serialization/MemoryWriter.h"
+ #include "StaticMeshDescription.h"
+ #include "StaticMeshOperations.h"
+@@ -384,7 +385,9 @@ void FStaticMeshSourceModel::ResetReductionSetting()
+ 	ReductionSettings.PercentVertices = 1.f;
+ 	ReductionSettings.MaxNumOfVerts = MAX_uint32;
+ }
++#endif // #if WITH_EDITOR
+ 
++#if WITH_EDITORONLY_DATA
+ void FStaticMeshSourceModel::SerializeBulkData(FArchive& Ar, UObject* Owner)
+ {
+ 	// Initialize the StaticMeshDescriptionBulkData
+@@ -399,6 +402,7 @@ void FStaticMeshSourceModel::SerializeBulkData(FArchive& Ar, UObject* Owner)
+ 		}
+ 	}
+ 
++#if WITH_EDITOR
+ 	if (Ar.IsLoading() && Ar.CustomVer(FEditorObjectVersion::GUID) < FEditorObjectVersion::StaticMeshDeprecatedRawMesh)
+ 	{
+ 		// If loading a legacy asset with RawMesh bulk data, serialize it here
+@@ -421,12 +425,58 @@ void FStaticMeshSourceModel::SerializeBulkData(FArchive& Ar, UObject* Owner)
+ 					StaticMeshDescriptionBulkData->GetBulkData().Serialize(Ar, Owner);
+ 				}
+ 			}
+-
+ 		}
+ 	}
++#else
++	// Non-Editor builds serialize the mesh description payload inline in a
++	// self-contained format. FEditorBulkData's persistent format is tied to
++	// the Editor-only bulk data registry / package trailer machinery, so it
++	// cannot round-trip from a Program target; serializing the FMeshDescription
++	// directly keeps the archive fully deterministic and inside the export.
++	if (Ar.IsLoading())
++	{
++		if (Ar.CustomVer(FUE5MainStreamObjectVersion::GUID) < FUE5MainStreamObjectVersion::SerializeMeshDescriptionBase)
++		{
++			// Legacy assets store an optional inline FByteBulkData
++			// (pre-FEditorBulkData format) at this point. Consume it so the
++			// archive stays aligned when loading engine content.
++			bool bIsValid;
++			Ar << bIsValid;
++			if (bIsValid)
++			{
++				FByteBulkData LegacyBulkData;
++				LegacyBulkData.Serialize(Ar, Owner);
++			}
++		}
++		else
++		{
++			bool bIsValid;
++			Ar << bIsValid;
++			if (bIsValid)
++			{
++				FMeshDescription MeshDescription;
++				Ar << MeshDescription;
++				StaticMeshDescriptionBulkData->CreateMeshDescription()->SetMeshDescription(MoveTemp(MeshDescription));
++				StaticMeshDescriptionBulkData->CommitMeshDescription(false);
++			}
++		}
++	}
++	else if (Ar.IsSaving() && Ar.CustomVer(FUE5MainStreamObjectVersion::GUID) >= FUE5MainStreamObjectVersion::SerializeMeshDescriptionBase)
++	{
++		FMeshDescription MeshDescription;
++		const bool bIsValid = StaticMeshDescriptionBulkData->IsBulkDataValid();
++		Ar << const_cast<bool&>(bIsValid);
++		if (bIsValid)
++		{
++			StaticMeshDescriptionBulkData->GetBulkData().LoadMeshDescription(MeshDescription);
++			Ar << MeshDescription;
++		}
++	}
++#endif
+ }
++#endif // WITH_EDITORONLY_DATA
+ 
+-
++#if WITH_EDITOR
+ void FStaticMeshSourceModel::FillMaterialName(TMap<int32, FName>& OutMaterialMap) const
+ {
+ 	check(StaticMeshDescriptionBulkData != nullptr);
+@@ -496,6 +546,7 @@ namespace StaticMeshConvertStats
+ #endif
+ 
+ 
++
+ void FStaticMeshSourceModel::ConvertRawMesh(int32 LodIndex)
+ {
+ 	check(StaticMeshDescriptionBulkData != nullptr);
+@@ -556,3 +607,102 @@ void FStaticMeshSourceModel::ConvertRawMesh(int32 LodIndex)
+ 
+ #endif // #if WITH_EDITOR
+ 
++#if WITH_EDITORONLY_DATA && !WITH_EDITOR
++// These three entry points only touch StaticMeshDescriptionBulkData and are
++// required by non-Editor Program targets (e.g. the CARLA asset probe) to recover
++// persisted geometry from an uncooked package. They are duplicated from the
++// WITH_EDITOR block above; keeping the Editor versions untouched avoids any
++// behavioural change for the editor while exposing the symbols in game-like builds.
++bool FStaticMeshSourceModel::LoadMeshDescription(FMeshDescription& OutMeshDescription) const
++{
++	TRACE_CPUPROFILER_EVENT_SCOPE(FStaticMeshSourceModel::LoadMeshDescription);
++
++	FScopeLock StaticMeshDescriptionBulkDataLock(&StaticMeshDescriptionBulkDataCS);
++
++	check(StaticMeshDescriptionBulkData != nullptr);
++
++	OutMeshDescription = FMeshDescription();
++
++	if (StaticMeshDescriptionBulkData->IsBulkDataValid())
++	{
++		StaticMeshDescriptionBulkData->GetBulkData().LoadMeshDescription(OutMeshDescription);
++		return true;
++	}
++
++	// RawMeshBulkData is Editor-only; in non-Editor builds it is always empty.
++
++	return false;
++}
++
++bool FStaticMeshSourceModel::CloneMeshDescription(FMeshDescription& OutMeshDescription) const
++{
++	TRACE_CPUPROFILER_EVENT_SCOPE(FStaticMeshSourceModel::CloneMeshDescription);
++
++	FScopeLock StaticMeshDescriptionBulkDataLock(&StaticMeshDescriptionBulkDataCS);
++
++	check(StaticMeshDescriptionBulkData != nullptr);
++	if (StaticMeshDescriptionBulkData->HasCachedMeshDescription())
++	{
++		OutMeshDescription = StaticMeshDescriptionBulkData->GetMeshDescription()->GetMeshDescription();
++		return true;
++	}
++
++	return LoadMeshDescription(OutMeshDescription);
++}
++
++bool FStaticMeshSourceModel::IsMeshDescriptionValid() const
++{
++	FScopeLock StaticMeshDescriptionBulkDataLock(&StaticMeshDescriptionBulkDataCS);
++
++	check(StaticMeshDescriptionBulkData != nullptr);
++	// RawMeshBulkData is Editor-only; in non-Editor builds it is always empty.
++	return StaticMeshDescriptionBulkData->HasCachedMeshDescription() || StaticMeshDescriptionBulkData->IsBulkDataValid();
++}
++
++FMeshDescription* FStaticMeshSourceModel::GetCachedMeshDescription() const
++{
++	FScopeLock StaticMeshDescriptionBulkDataLock(&StaticMeshDescriptionBulkDataCS);
++
++	check(StaticMeshDescriptionBulkData != nullptr);
++	if (StaticMeshDescriptionBulkData->HasCachedMeshDescription())
++	{
++		return &StaticMeshDescriptionBulkData->GetMeshDescription()->GetMeshDescription();
++	}
++
++	return nullptr;
++}
++
++FMeshDescription* FStaticMeshSourceModel::CreateMeshDescription()
++{
++	FScopeLock StaticMeshDescriptionBulkDataLock(&StaticMeshDescriptionBulkDataCS);
++	check(StaticMeshDescriptionBulkData != nullptr);
++	return &StaticMeshDescriptionBulkData->CreateMeshDescription()->GetMeshDescription();
++}
++
++void FStaticMeshSourceModel::CommitMeshDescription(bool bUseHashAsGuid)
++{
++	TRACE_CPUPROFILER_EVENT_SCOPE(FStaticMeshSourceModel::CommitMeshDescription);
++
++	FScopeLock StaticMeshDescriptionBulkDataLock(&StaticMeshDescriptionBulkDataCS);
++
++	// RawMeshBulkData is Editor-only; in non-Editor builds it is always empty.
++
++	check(StaticMeshDescriptionBulkData != nullptr);
++
++	CacheMeshDescriptionTrianglesCount = MAX_uint32;
++	CacheMeshDescriptionVerticesCount = MAX_uint32;
++	if (StaticMeshDescriptionBulkData->HasCachedMeshDescription())
++	{
++		StaticMeshDescriptionBulkData->CommitMeshDescription(bUseHashAsGuid);
++		if (FMeshDescription* MeshDescription = GetCachedMeshDescription())
++		{
++			CacheMeshDescriptionTrianglesCount = static_cast<uint32>(MeshDescription->Triangles().Num());
++			CacheMeshDescriptionVerticesCount = static_cast<uint32>(FStaticMeshOperations::GetUniqueVertexCount(*MeshDescription));
++		}
++	}
++	else
++	{
++		StaticMeshDescriptionBulkData->Empty();
++	}
++}
++#endif // WITH_EDITORONLY_DATA && !WITH_EDITOR

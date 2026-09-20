@@ -1,0 +1,153 @@
+diff --git a/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp b/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp
+index a5ef70be1..c0680271a 100644
+--- a/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp
+@@ -382,6 +382,7 @@ void FMaterialResource::GetStaticParameterSet(EShaderPlatform Platform, FStaticP
+ 	FMaterial::GetStaticParameterSet(Platform, OutSet);
+ 
+ 	// Get the set from instance
++#if WITH_EDITOR
+ 	if (MaterialInstance)
+ 	{
+ 		MaterialInstance->GetStaticParameterValues(OutSet);
+@@ -390,6 +391,7 @@ void FMaterialResource::GetStaticParameterSet(EShaderPlatform Platform, FStaticP
+ 	{
+ 		Material->GetStaticParameterValues(OutSet);
+ 	}
++#endif
+ }
+ #endif // WITH_EDITORONLY_DATA
+ 
+@@ -2103,6 +2105,10 @@ TOptional<UMaterial::FLayersInterfaces> UMaterial::GetExpressionLayers(const UMa
+ 	return {};
+ }
+ 
++#endif // WITH_EDITORONLY_DATA
++
++#if WITH_EDITOR
++
+ void UMaterial::UpdateTransientExpressionData()
+ {
+ 	for (UMaterialExpression* Expression : GetExpressions())
+@@ -2116,10 +2122,6 @@ void UMaterial::UpdateTransientExpressionData()
+ 	}
+ }
+ 
+-#endif // WITH_EDITORONLY_DATA
+-
+-#if WITH_EDITOR
+-
+ static FSubstrateMaterialInfo GetSubstrateMaterialInfo(UMaterialEditorOnlyData* EditorOnly)
+ {
+ 	FSubstrateMaterialInfo Out;
+@@ -2229,7 +2231,7 @@ bool UMaterial::GetMaterialLayers(FMaterialLayersFunctions& OutLayers, TMicRecur
+ 	if (CachedExpressionData && CachedExpressionData->bHasMaterialLayers)
+ 	{
+ 		OutLayers.GetRuntime() = CachedExpressionData->MaterialLayers;
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 		if (CachedExpressionData->EditorOnlyData)
+ 		{
+ 			// cooked materials can strip out material layer information
+@@ -2243,7 +2245,7 @@ bool UMaterial::GetMaterialLayers(FMaterialLayersFunctions& OutLayers, TMicRecur
+ 				return false;
+ 			}
+ 		}
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 		return true;
+ 	}
+ 	return false;
+@@ -3000,7 +3002,7 @@ void UMaterial::Serialize(FArchive& Ar)
+ 	}
+ #endif
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	if (MaterialDomain == MD_Volume && Ar.IsLoading() && Ar.CustomVer(FRenderingObjectVersion::GUID) < FRenderingObjectVersion::VolumeExtinctionBecomesRGB)
+ 	{
+ 		// Note: we work on _DEPRECATED data because that will be used later to create the EditorOnly data in PostLoad().
+@@ -3017,7 +3019,7 @@ void UMaterial::Serialize(FArchive& Ar)
+ 			ReleaseResourcesAndMutateDDCKey(VolumeExtinctionBecomesRGBConversionGuid);
+ 		}
+ 	}
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 
+ 	if (Ar.IsLoading() && Ar.CustomVer(FUE5MainStreamObjectVersion::GUID) < FUE5MainStreamObjectVersion::MaterialTranslucencyPass)
+ 	{
+@@ -4026,6 +4028,7 @@ bool UMaterial::ConvertMaterialToSubstrateMaterial(bool bAllowEmptyMaterialUpdat
+ 
+ TMap<FGuid, UMaterialInterface*> LightingGuidFixupMap;
+ 
++#if WITH_EDITOR
+ template<typename InputType>
+ static void MoveExpressionInput(InputType& Src, InputType& OutDst)
+ {
+@@ -4034,6 +4037,7 @@ static void MoveExpressionInput(InputType& Src, InputType& OutDst)
+ 		OutDst = MoveTemp(Src);
+ 	}
+ }
++#endif
+ 
+ void UMaterial::PostLoad()
+ {
+@@ -4061,7 +4065,7 @@ void UMaterial::PostLoad()
+ 
+ 	NaniteOverrideMaterial.FixupLegacySoftReference(this);
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	const FPackageFileVersion UEVer = GetLinkerUEVersion();
+ 	const int32 RenderObjVer = GetLinkerCustomVersion(FRenderingObjectVersion::GUID);
+ 	const int32 UE5MainVer = GetLinkerCustomVersion(FUE5MainStreamObjectVersion::GUID);
+@@ -4313,9 +4317,6 @@ void UMaterial::PostLoad()
+ #endif
+ 	}
+ 
+-#endif // WITH_EDITOR
+-
+-#if WITH_EDITORONLY_DATA
+ 	if (MaterialDomain == MD_Volume && UE5MainVer < FUE5MainStreamObjectVersion::MaterialHasIsUsedWithVolumetricCloudFlag)
+ 	{
+ 		bUsedWithVolumetricCloud = HasAnyExpressionsInMaterialAndFunctionsOfType<UMaterialExpressionCloudSampleAttribute>()
+@@ -4327,7 +4328,7 @@ void UMaterial::PostLoad()
+ 			ReleaseResourcesAndMutateDDCKey(BackwardsCompatibilityUsedWithVolumetricCloudConversionGuid);
+ 		}
+ 	}
+-#endif
++#endif // WITH_EDITOR
+ 
+ #if WITH_EDITOR
+ 	if (Substrate::IsSubstrateEnabled())
+@@ -4342,7 +4343,11 @@ void UMaterial::PostLoad()
+ 	}
+ #endif // WITH_EDITOR
+ 
+-	checkf(CachedExpressionData, TEXT("Missing cached expression data for material, should have been either serialized or created during PostLoad"));
++	if (!CachedExpressionData)
++	{
++		// Non-editor programs (WITH_EDITOR=0) cannot rebuild cached expression data; fall back to an empty entry.
++		CachedExpressionData.Reset(new FMaterialCachedExpressionData());
++	}
+ 
+ 	for (const FMaterialParameterCollectionInfo& CollectionInfo : CachedExpressionData->ParameterCollectionInfos)
+ 	{
+@@ -7572,7 +7577,7 @@ bool UMaterial::IsPropertyActiveInDerived(EMaterialProperty InProperty, const UM
+ 		IsPropertySupported(InProperty));
+ }
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ void UMaterial::FlipExpressionPositions(TConstArrayView<TObjectPtr<UMaterialExpression>> Expressions, TConstArrayView<TObjectPtr<UMaterialExpressionComment>> Comments, bool bScaleCoords, UMaterial* InMaterial)
+ {
+ 	// Rough estimate of average increase in node size for the new editor
+@@ -7664,7 +7669,7 @@ bool UMaterial::FixFeatureLevelNodesForSM6(TArray<UMaterialExpression*> const& I
+ 	return bRequiredChange;
+ }
+ 
+-#endif //WITH_EDITORONLY_DATA
++#endif //WITH_EDITOR
+ 
+ void UMaterial::GetLightingGuidChain(bool bIncludeTextures, TArray<FGuid>& OutGuids) const
+ {

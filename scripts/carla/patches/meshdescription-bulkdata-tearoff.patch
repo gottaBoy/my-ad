@@ -1,0 +1,30 @@
+diff --git a/Engine/Source/Runtime/MeshDescription/Private/MeshDescription.cpp b/Engine/Source/Runtime/MeshDescription/Private/MeshDescription.cpp
+index c80ee1191..cd12d1614 100644
+--- a/Engine/Source/Runtime/MeshDescription/Private/MeshDescription.cpp
++++ b/Engine/Source/Runtime/MeshDescription/Private/MeshDescription.cpp
+@@ -2140,6 +2140,11 @@ void FMeshDescriptionBulkData::Serialize( FArchive& Ar, UObject* Owner )
+ }
+ 
+ 
++void FMeshDescriptionBulkData::TearOff()
++{
++	BulkData.TearOff();
++}
++
+ void FMeshDescriptionBulkData::SaveMeshDescription( FMeshDescription& MeshDescription )
+ {
+ 	TRACE_CPUPROFILER_EVENT_SCOPE(FMeshDescriptionBulkData::SaveMeshDescription);
+diff --git a/Engine/Source/Runtime/MeshDescription/Public/MeshDescription.h b/Engine/Source/Runtime/MeshDescription/Public/MeshDescription.h
+index db6943183..501cf41c5 100644
+--- a/Engine/Source/Runtime/MeshDescription/Public/MeshDescription.h
++++ b/Engine/Source/Runtime/MeshDescription/Public/MeshDescription.h
+@@ -1351,6 +1351,9 @@ public:
+ 	/** Uses a hash as the GUID, useful to prevent recomputing content already in cache. */
+ 	MESHDESCRIPTION_API void UseHashAsGuid();
+ 
++	/** Detach the payload from the bulk data registry (required when saving from a non-Editor Program target). */
++	MESHDESCRIPTION_API void TearOff();
++
+ 	/** Gets the size of the serialized bulk data */
+ 	int64 GetBulkDataSize() { return BulkData.GetPayloadSize(); }
+ 

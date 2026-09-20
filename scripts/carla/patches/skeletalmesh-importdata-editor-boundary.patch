@@ -1,0 +1,83 @@
+diff --git a/Engine/Source/Runtime/Engine/Private/Rendering/SkeletalMeshLODImporterData.cpp b/Engine/Source/Runtime/Engine/Private/Rendering/SkeletalMeshLODImporterData.cpp
+index e38630726..79a80c4fd 100644
+--- a/Engine/Source/Runtime/Engine/Private/Rendering/SkeletalMeshLODImporterData.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Rendering/SkeletalMeshLODImporterData.cpp
+@@ -640,13 +640,18 @@ void FInlineReductionCacheData::GetCacheGeometryInfo(uint32& LODVertexCount, uin
+ FRawSkeletalMeshBulkData
+ ------------------------------------------------------------------------------*/
+ 
++#endif // WITH_EDITOR
++
++#if WITH_EDITORONLY_DATA
+ FRawSkeletalMeshBulkData::FRawSkeletalMeshBulkData()
+ 	: bGuidIsHash(false)
+ {
+ 	GeoImportVersion = ESkeletalMeshGeoImportVersions::Before_Versionning;
+ 	SkinningImportVersion = ESkeletalMeshSkinningImportVersions::Before_Versionning;
+ }
++#endif // WITH_EDITORONLY_DATA
+ 
++#if WITH_EDITOR
+ 
+ /**
+ * Serialization of raw meshes uses its own versioning scheme because it is
+@@ -772,6 +777,9 @@ FArchive& operator<<(FArchive& Ar, FSkeletalMeshImportData& RawMesh)
+ 	return Ar;
+ }
+ 
++#endif // WITH_EDITOR
++
++#if WITH_EDITORONLY_DATA
+ void FRawSkeletalMeshBulkData::Serialize(FArchive& Ar, TArray<TSharedRef<FRawSkeletalMeshBulkData>>& RawSkeltalMeshBulkDatas, UObject* Owner)
+ {
+ 	Ar.CountBytes(RawSkeltalMeshBulkDatas.Num() * sizeof(FRawSkeletalMeshBulkData), RawSkeltalMeshBulkDatas.Num() * sizeof(FRawSkeletalMeshBulkData));
+@@ -834,7 +842,9 @@ void FRawSkeletalMeshBulkData::Serialize(FArchive& Ar, UObject* Owner)
+ 
+ 	// An exclusive lock is required so we can safely load/save the raw data from multiple threads
+ 	{
++#if WITH_EDITOR
+ 		FWriteScopeLock ScopeLock(BulkDataLock.Get());
++#endif
+ 		BulkData.Serialize(Ar, Owner);
+ 	}
+ 
+@@ -845,10 +855,12 @@ void FRawSkeletalMeshBulkData::Serialize(FArchive& Ar, UObject* Owner)
+ 	{
+ 		//Save the custom version so we can load FReductionSkeletalMeshData later
+ 		BulkData.GetBulkDataVersions(Ar, UEVersion, LicenseeUEVersion, SerializeLoadingCustomVersionContainer);
+-		bUseSerializeLoadingCustomVersion = true;
+-	}
++			bUseSerializeLoadingCustomVersion = true;
++		}
+ }
++#endif // WITH_EDITORONLY_DATA
+ 
++#if WITH_EDITOR
+ void FRawSkeletalMeshBulkData::SaveRawMesh(FSkeletalMeshImportData& InMesh)
+ {
+ 	// An exclusive lock is required so we can safely load the raw data from multiple threads
+@@ -928,8 +940,12 @@ void FRawSkeletalMeshBulkData::LoadRawMesh(FSkeletalMeshImportData& OutMesh)
+ }
+ 
+ 
++#endif // WITH_EDITOR
++
++#if WITH_EDITORONLY_DATA
+ void FRawSkeletalMeshBulkData::UpdateRawMeshFormat()
+ {
++#if WITH_EDITOR
+ 	if (BulkData.GetElementCount() == 0)
+ 	{
+ 		return;
+@@ -1008,8 +1024,11 @@ void FRawSkeletalMeshBulkData::UpdateRawMeshFormat()
+ 		Sha.GetHash((uint8*)Hash);
+ 		Guid = FGuid(Hash[0] ^ Hash[4], Hash[1], Hash[2], Hash[3]);
+ 	}
++#endif // WITH_EDITOR
+ }
++#endif // WITH_EDITORONLY_DATA
+ 
++#if WITH_EDITOR
+ FString FRawSkeletalMeshBulkData::GetIdString() const
+ {
+ 	FString GuidString = Guid.ToString();

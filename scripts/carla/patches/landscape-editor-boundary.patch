@@ -1,0 +1,675 @@
+diff --git a/Engine/Source/Runtime/Engine/Classes/Engine/PoseWatch.h b/Engine/Source/Runtime/Engine/Classes/Engine/PoseWatch.h
+index d867e2152..69e288578 100644
+--- a/Engine/Source/Runtime/Engine/Classes/Engine/PoseWatch.h
++++ b/Engine/Source/Runtime/Engine/Classes/Engine/PoseWatch.h
+@@ -143,6 +143,8 @@ public:
+ 
+ 	/** Returns the display label assigned to this pose watch */
+ 	ENGINE_API FText GetLabel() const;
++#endif // WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 
+ 	/** Returns the visibility of this pose watch */
+ 	ENGINE_API bool GetIsVisible() const;
+@@ -152,6 +154,8 @@ public:
+ 
+ 	/** Returns the parent pose watch this element belongs to. */
+ 	ENGINE_API UPoseWatch* GetParent() const;
++#endif // WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 
+ 	/**  Sets this element's parent. */
+ 	ENGINE_API void SetParent(UPoseWatch* InParent);
+@@ -234,13 +238,13 @@ public:
+ 
+ 	ENGINE_API UPoseWatchPoseElement(const class FObjectInitializer& PCIP);
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 
+ 	ENGINE_API virtual bool GetIsEnabled() const;
+ 
+ 	static ENGINE_API FSlateIcon StaticGetIcon();
+ 
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+ #if WITH_EDITORONLY_DATA
+ 	/** Optionally select a Blend Mask to control which bones on the skeleton are rendered. Any non-zero entries are rendered. */
+@@ -284,9 +288,6 @@ public:
+ 	/** Returns true if any child element is enabled */
+ 	ENGINE_API bool GetIsEnabled() const;
+ 
+-	/** Returns true if the this pose watch's node is active in its anim graph */
+-	ENGINE_API bool GetIsNodeEnabled() const;
+-
+ 	/** Returns the color to display the pose watch using */
+ 	UE_DEPRECATED(5.1, "Node watches no longer have colors, use the color of its elements instead.")
+ 	ENGINE_API FColor GetColor() const;
+@@ -307,9 +308,15 @@ public:
+ 	 *	 Using bForce may change the pose watch's label to ensure no name clashes
+ 	 */
+ 	ENGINE_API bool SetParent(UPoseWatchFolder* InParent, bool bForce=false);
++#endif // WITH_EDITOR
++#if WITH_EDITORONLY_DATA
++	/** Returns true if the this pose watch's node is active in its anim graph */
++	ENGINE_API bool GetIsNodeEnabled() const;
+ 
+ 	/** If set, denotes the pose watch is able to be drawn to the viewport */
+ 	ENGINE_API void SetIsNodeEnabled(const bool bInIsEnabled);
++#endif // WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 
+ 	/** Alias of SetParent */
+ 	ENGINE_API void MoveTo(UPoseWatchFolder* InFolder);
+diff --git a/Engine/Source/Runtime/Engine/Private/Engine/PoseWatch.cpp b/Engine/Source/Runtime/Engine/Private/Engine/PoseWatch.cpp
+index 4f87bc948..fc24732a0 100644
+--- a/Engine/Source/Runtime/Engine/Private/Engine/PoseWatch.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Engine/PoseWatch.cpp
+@@ -344,6 +344,8 @@ FText UPoseWatchElement::GetLabel() const
+ 	return Label;
+ }
+ 
++#endif // WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ bool UPoseWatchElement::GetIsVisible() const
+ {
+ 	return bIsVisible;
+@@ -358,6 +360,8 @@ UPoseWatch* UPoseWatchElement::GetParent() const
+ {
+ 	return Parent.Get();
+ }
++#endif // WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 
+ void UPoseWatchElement::SetParent(UPoseWatch* InParent)
+ {
+@@ -485,8 +489,7 @@ UPoseWatchPoseElement::UPoseWatchPoseElement(const FObjectInitializer& ObjectIni
+ #endif
+ }
+ 
+-#if WITH_EDITOR
+-
++#if WITH_EDITORONLY_DATA
+ bool UPoseWatchPoseElement::GetIsEnabled() const
+ {
+ 	return Parent.Get() && Parent->GetIsNodeEnabled();
+@@ -498,7 +501,7 @@ FSlateIcon UPoseWatchPoseElement::StaticGetIcon()
+ 	return Icon;
+ }
+ 
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+ // UPoseWatch
+ 
+@@ -551,10 +554,16 @@ bool UPoseWatch::GetIsVisible() const
+ 	return bIsVisible;
+ }
+ 
++#endif // WITH_EDITOR
++
++#if WITH_EDITORONLY_DATA
+ bool UPoseWatch::GetIsNodeEnabled() const
+ {
+ 	return bIsNodeEnabled;
+ }
++#endif // WITH_EDITORONLY_DATA
++
++#if WITH_EDITOR
+ 
+ bool UPoseWatch::GetIsEnabled() const
+ {
+@@ -627,11 +636,15 @@ bool UPoseWatch::SetParent(UPoseWatchFolder* InParent, bool bForce)
+ 	return true;
+ }
+ 
++#endif // WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ void UPoseWatch::SetIsNodeEnabled(const bool bInIsNodeEnabled)
+ {
+ 	bIsNodeEnabled = bInIsNodeEnabled;
+ }
+ 
++#endif // WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ void UPoseWatch::MoveTo(UPoseWatchFolder* InFolder)
+ {
+ 	SetParent(InFolder);
+@@ -801,8 +814,10 @@ void UPoseWatch::Serialize(FArchive& Ar)
+ 	{
+ 		// Transfer pose watch skeleton draw parameters to a new pose watch pose element.
+ 		TObjectPtr<UPoseWatchPoseElement> NewPoseWatchElement = NewObject<UPoseWatchPoseElement>(this);
++#if WITH_EDITOR
+ 		NewPoseWatchElement->SetParent(this);
+ 		NewPoseWatchElement->SetColor(Color_DEPRECATED);
++#endif
+ 		NewPoseWatchElement->ViewportMask = ViewportMask_DEPRECATED;
+ 		NewPoseWatchElement->bInvertViewportMask = bInvertViewportMask_DEPRECATED;
+ 		NewPoseWatchElement->BlendScaleThreshold = BlendScaleThreshold_DEPRECATED;
+diff --git a/Engine/Source/Runtime/Engine/Private/Engine/PoseWatchRenderData.cpp b/Engine/Source/Runtime/Engine/Private/Engine/PoseWatchRenderData.cpp
+index 5de9e024c..d31a772b7 100644
+--- a/Engine/Source/Runtime/Engine/Private/Engine/PoseWatchRenderData.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Engine/PoseWatchRenderData.cpp
+@@ -30,7 +30,9 @@ void FAnimNodePoseWatch::SetWorldTransform(const FTransform& InWorldTransform)
+ 
+ void FAnimNodePoseWatch::CopyPoseWatchData(const FReferenceSkeleton& RefSkeleton)
+ {
++#if WITH_EDITOR
+ 	BoneColor = FLinearColor(PoseWatchPoseElement->GetColor());
++#endif
+ 	ViewportOffset = PoseWatchPoseElement->ViewportOffset;
+ 	ParentIndices.Empty();
+ 	ViewportMaskAllowedList.Empty();
+diff --git a/Engine/Source/Runtime/Landscape/Classes/Landscape.h b/Engine/Source/Runtime/Landscape/Classes/Landscape.h
+index 686a1aa42..b60ca88f4 100644
+--- a/Engine/Source/Runtime/Landscape/Classes/Landscape.h
++++ b/Engine/Source/Runtime/Landscape/Classes/Landscape.h
+@@ -369,7 +369,14 @@ public:
+ 	LANDSCAPE_API void RequestLayersContentUpdate(ELandscapeLayerUpdateMode InModeMask);
+ 	LANDSCAPE_API bool ReorderLayer(int32 InStartingLayerIndex, int32 InDestinationLayerIndex);
+ 	LANDSCAPE_API FLandscapeLayer* DuplicateLayerAndMoveBrushes(const FLandscapeLayer& InOtherLayer);
++#endif
++
++#if WITH_EDITORONLY_DATA
++	LANDSCAPE_API void SetEditingLayer(const FGuid& InLayerGuid = FGuid());
++	LANDSCAPE_API const FGuid& GetEditingLayer() const;
++#endif
+ 
++#if WITH_EDITOR
+ 	/** 
+ 	* Creates a new edit layer
+ 	* @Param InName is the name of the new edit layer
+@@ -441,9 +448,7 @@ public:
+ 	LANDSCAPE_API bool DeleteLayer(int32 InLayerIndex);
+ 	LANDSCAPE_API void CollapseLayer(int32 InLayerIndex);
+ 	LANDSCAPE_API void DeleteLayers();
+-	LANDSCAPE_API void SetEditingLayer(const FGuid& InLayerGuid = FGuid());
+ 	LANDSCAPE_API void SetGrassUpdateEnabled(bool bInGrassUpdateEnabled);
+-	LANDSCAPE_API const FGuid& GetEditingLayer() const;
+ 	LANDSCAPE_API bool IsMaxLayersReached() const;
+ 	LANDSCAPE_API void ShowOnlySelectedLayer(int32 InLayerIndex);
+ 	LANDSCAPE_API void ShowAllLayers();
+@@ -471,7 +476,13 @@ public:
+ 	LANDSCAPE_API bool ReorderLayerBrush(int32 InLayerIndex, int32 InStartingLayerBrushIndex, int32 InDestinationLayerBrushIndex);
+ 	LANDSCAPE_API class ALandscapeBlueprintBrushBase* GetBrushForLayer(int32 InLayerIndex, int32 BrushIndex) const;
+ 	LANDSCAPE_API TArray<class ALandscapeBlueprintBrushBase*> GetBrushesForLayer(int32 InLayerIndex) const;
++#endif
++
++#if WITH_EDITORONLY_DATA
+ 	LANDSCAPE_API void OnBlueprintBrushChanged();
++#endif
++
++#if WITH_EDITOR
+ 	LANDSCAPE_API void OnLayerInfoSplineFalloffModulationChanged(ULandscapeLayerInfoObject* InLayerInfo);
+ 	LANDSCAPE_API void OnPreSave();
+ 
+diff --git a/Engine/Source/Runtime/Landscape/Classes/LandscapeComponent.h b/Engine/Source/Runtime/Landscape/Classes/LandscapeComponent.h
+index af30b55b0..1581ee685 100644
+--- a/Engine/Source/Runtime/Landscape/Classes/LandscapeComponent.h
++++ b/Engine/Source/Runtime/Landscape/Classes/LandscapeComponent.h
+@@ -786,6 +786,22 @@ public:
+ 	LANDSCAPE_API void SetWeightmapTextures(const TArray<UTexture2D*>& InNewWeightmapTextures, bool InApplyToEditingWeightmap = false);
+ 	void SetWeightmapTexturesInternal(const TArray<UTexture2D*>& InNewWeightmapTextures, const FGuid& InEditLayerGuid);
+ 
++	// Read-only helpers are used by editor-only programs that do not compile WITH_EDITOR.
++#if WITH_EDITORONLY_DATA
++	LANDSCAPE_API bool HasLayersData() const;
++
++	/** Get the Landscape Actor's editing layer data */
++	FLandscapeLayerComponentData* GetEditingLayer();
++	const FLandscapeLayerComponentData* GetEditingLayer() const;
++
++	/** Get the Landscape Actor's editing layer GUID */
++	FGuid GetEditingLayerGUID() const;
++
++	/** Return edit layer component data, or null when the GUID is not present. */
++	LANDSCAPE_API const FLandscapeLayerComponentData* GetLayerData(const FGuid& InLayerGuid) const;
++	LANDSCAPE_API FLandscapeLayerComponentData* GetLayerData(const FGuid& InLayerGuid);
++#endif // WITH_EDITORONLY_DATA
++
+ #if WITH_EDITOR
+ 	LANDSCAPE_API void SetWeightmapLayerAllocations(const TArray<FWeightmapLayerAllocationInfo>& InNewWeightmapLayerAllocations);
+ 	LANDSCAPE_API uint32 ComputeLayerHash(bool InReturnEditingHash = true) const;
+@@ -799,29 +815,21 @@ public:
+ 	LANDSCAPE_API const TArray<ULandscapeWeightmapUsage*>& GetWeightmapTexturesUsage(const FGuid& InLayerGuid) const;
+ 	LANDSCAPE_API void InitializeLayersWeightmapUsage(const FGuid& InLayerGuid);
+ 
+-	LANDSCAPE_API bool HasLayersData() const;
+-	LANDSCAPE_API const FLandscapeLayerComponentData* GetLayerData(const FGuid& InLayerGuid) const;
+-	LANDSCAPE_API FLandscapeLayerComponentData* GetLayerData(const FGuid& InLayerGuid);
+ 	LANDSCAPE_API void AddLayerData(const FGuid& InLayerGuid, const FLandscapeLayerComponentData& InData);
+ 	LANDSCAPE_API void AddDefaultLayerData(const FGuid& InLayerGuid, const TArray<ULandscapeComponent*>& InComponentsUsingHeightmap, TMap<UTexture2D*, UTexture2D*>& InOutCreatedHeightmapTextures);
+ 	LANDSCAPE_API void RemoveLayerData(const FGuid& InLayerGuid);
+ 	LANDSCAPE_API void ForEachLayer(TFunctionRef<void(const FGuid&, struct FLandscapeLayerComponentData&)> Fn);
+ 
+-	/** Get the Landscape Actor's editing layer data */
+-	FLandscapeLayerComponentData* GetEditingLayer();
+-	const FLandscapeLayerComponentData* GetEditingLayer() const;
+-
+-	/** Get the Landscape Actor's editing layer GUID */
+-	FGuid GetEditingLayerGUID() const;
+-
+-	void CopyFinalLayerIntoEditingLayer(FLandscapeEditDataInterface& DataInterface, TSet<UTexture2D*>& ProcessedHeightmaps);
+-
+ 	void SetPendingCollisionDataUpdate(bool bInPendingCollisionDataUpdate) { bPendingCollisionDataUpdate = bInPendingCollisionDataUpdate; }
+ 	bool GetPendingCollisionDataUpdate() const { return bPendingCollisionDataUpdate; }
+ 	void SetPendingLayerCollisionDataUpdate(bool bInPendingLayerCollisionDataUpdate) { bPendingLayerCollisionDataUpdate = bInPendingLayerCollisionDataUpdate; }
+ 	bool GetPendingLayerCollisionDataUpdate() const { return bPendingLayerCollisionDataUpdate; }
+ #endif // WITH_EDITOR
+ 
++#if WITH_EDITOR
++	void CopyFinalLayerIntoEditingLayer(FLandscapeEditDataInterface& DataInterface, TSet<UTexture2D*>& ProcessedHeightmaps);
++#endif
++
+ 	virtual bool IsShown(const FEngineShowFlags& ShowFlags) const override;
+ 
+ #if WITH_EDITOR
+diff --git a/Engine/Source/Runtime/Landscape/Classes/LandscapeProxy.h b/Engine/Source/Runtime/Landscape/Classes/LandscapeProxy.h
+index 81699c5f1..871350078 100644
+--- a/Engine/Source/Runtime/Landscape/Classes/LandscapeProxy.h
++++ b/Engine/Source/Runtime/Landscape/Classes/LandscapeProxy.h
+@@ -380,7 +380,7 @@ struct UE_DEPRECATED(all, "FLandscapeProxyMaterialOverride is deprecated; please
+ };
+ 
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ // Tracks delayed updates triggered by landscape updates.
+ // It's responsible for preventing expensive async operations while the user is still editing the landscape
+ struct FAsyncWorkMonitor 
+@@ -405,7 +405,7 @@ private:
+ 
+ 	TStaticArray<FAsyncWorkTypeInfo, static_cast<uint32>(EAsyncWorkType::Max)> WorkTypeInfos; // [static_cast<uint32>(EAsyncWorkType::Max)] ;
+ };
+-#endif 
++#endif // WITH_EDITORONLY_DATA
+ UCLASS(Abstract, MinimalAPI, NotBlueprintable, NotPlaceable, hidecategories=(Display, Attachment, Physics, Debug, Lighting), showcategories=(Lighting, Rendering, Transformation), hidecategories=(Mobility))
+ class ALandscapeProxy : public APartitionActor, public ILandscapeSplineInterface
+ {
+@@ -418,7 +418,7 @@ public:
+ 
+ protected:
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ 	/** 
+ 	* Hard refs to actors that need to be loaded when this proxy is loaded.
+ 	* It is currently used for 2 cases : 
+@@ -429,7 +429,7 @@ protected:
+ 	TSet<FWorldPartitionReference> ActorDescReferences;
+ 
+ 	friend class FLandscapeActorDesc;
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 
+ 	UPROPERTY()
+ 	TObjectPtr<ULandscapeSplinesComponent> SplineComponent;
+@@ -466,15 +466,17 @@ protected:
+ 
+ 	UPROPERTY(EditAnywhere, Category = Nanite, AdvancedDisplay, meta = (EditCondition = "bEnableNanite", LandscapeInherited))
+ 	float NaniteSkirtDepth = 0.1f;
+-	
++
+ 	UPROPERTY(EditAnywhere, Category = Nanite, AdvancedDisplay, meta = (EditCondition = "bEnableNanite", LandscapeInherited))
+ 	int32 NanitePositionPrecision = 0;
+ 
+ 	UPROPERTY(EditAnywhere, Category = Nanite, AdvancedDisplay, meta = (EditCondition = "bEnableNanite", LandscapeInherited))
+ 	float NaniteMaxEdgeLengthFactor = 16.0f;
++#endif // WITH_EDITORONLY_DATA
+ 
++#if WITH_EDITOR
+ 	LANDSCAPE_API static FOnLandscapeProxyFixupSharedDataDelegate OnLandscapeProxyFixupSharedDataDelegate;
+-#endif // WITH_EDITORONLY_DATA
++#endif // WITH_EDITOR
+ 
+ 	/** Disable runtime grass data generation.  If disabled, the grass maps will be serialized at cook time. Do not set directly, use ALandscape::SetDisableRuntimeGrassMapGeneration to ensure it is set on all loaded proxies. */
+ 	UPROPERTY(meta = (LandscapeInherited))
+@@ -1234,6 +1236,9 @@ PRAGMA_ENABLE_DEPRECATION_WARNINGS
+ 	// Retrieve the screen size at which each LOD should be rendered
+ 	LANDSCAPE_API TArray<float> GetLODScreenSizeArray() const;
+ 
++	/** Will tell if the landscape proxy can have some content related to the layer system */
++	LANDSCAPE_API bool CanHaveLayersContent() const;
++
+ #if WITH_EDITOR
+ 	// Copy properties from parent Landscape actor
+ 	LANDSCAPE_API void CopySharedProperties(ALandscapeProxy* InLandscape);
+@@ -1541,11 +1546,10 @@ PRAGMA_ENABLE_DEPRECATION_WARNINGS
+ 	DECLARE_EVENT(ALandscape, FLandscapeMaterialChangedDelegate);
+ 	FLandscapeMaterialChangedDelegate& OnMaterialChangedDelegate() { return LandscapeMaterialChangedDelegate; }
+ 
++#if WITH_EDITOR
+ 	/** Will tell if the landscape proxy as some content related to the layer system */
+ 	LANDSCAPE_API virtual bool HasLayersContent() const;
+-	
+-	/** Will tell if the landscape proxy can have some content related to the layer system */
+-	LANDSCAPE_API bool CanHaveLayersContent() const;
++#endif // WITH_EDITOR
+ 
+ 	LANDSCAPE_API virtual void UpdateCachedHasLayersContent(bool InCheckComponentDataIntegrity = false);
+ 
+@@ -1659,10 +1663,10 @@ private:
+ 	FAsyncWorkMonitor AsyncWorkMonitor;
+ #endif // WITH_EDITORONLY_DATA
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 	static constexpr TCHAR const* LandscapeInheritedTag = TEXT("LandscapeInherited");
+ 	static constexpr TCHAR const* LandscapeOverridableTag = TEXT("LandscapeOverridable");
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ };
+ 
+ 
+diff --git a/Engine/Source/Runtime/Landscape/Classes/LandscapeSplineControlPoint.h b/Engine/Source/Runtime/Landscape/Classes/LandscapeSplineControlPoint.h
+index c33c9c260..9aa7779b4 100644
+--- a/Engine/Source/Runtime/Landscape/Classes/LandscapeSplineControlPoint.h
++++ b/Engine/Source/Runtime/Landscape/Classes/LandscapeSplineControlPoint.h
+@@ -236,6 +236,8 @@ public:
+ 	const FBox& GetBounds() const { return Bounds; }
+ 	const TArray<FLandscapeSplineInterpPoint>& GetPoints() const { return Points; }
+ 
++	LANDSCAPE_API FName GetCollisionProfileName() const;
++
+ #if WITH_EDITOR
+ 	bool SupportsForeignSplineMesh() const;
+ 
+@@ -270,7 +272,6 @@ public:
+ 	const TSoftObjectPtr<UWorld>& GetForeignWorld() const { return ForeignWorld; }
+ 	FGuid GetModificationKey() const { return ModificationKey; }
+ 
+-	LANDSCAPE_API FName GetCollisionProfileName() const;
+ #endif // WITH_EDITOR
+ 
+ 	//~ Begin UObject Interface
+diff --git a/Engine/Source/Runtime/Landscape/Classes/LandscapeSplineSegment.h b/Engine/Source/Runtime/Landscape/Classes/LandscapeSplineSegment.h
+index ccce7d4bf..f7ed1a9c5 100644
+--- a/Engine/Source/Runtime/Landscape/Classes/LandscapeSplineSegment.h
++++ b/Engine/Source/Runtime/Landscape/Classes/LandscapeSplineSegment.h
+@@ -338,6 +338,8 @@ public:
+ 	const FBox& GetBounds() const { return Bounds; }
+ 	const TArray<FLandscapeSplineInterpPoint>& GetPoints() const { return Points; }
+ 
++	LANDSCAPE_API FName GetCollisionProfileName() const;
++
+ #if WITH_EDITOR
+ 	bool SupportsForeignSplineMesh() const;
+ 
+@@ -354,8 +356,6 @@ public:
+ 	void UpdateSplineEditorMesh();
+ 	virtual void DeleteSplinePoints();
+ 
+-	LANDSCAPE_API FName GetCollisionProfileName() const;
+-
+ 	const TArray<TSoftObjectPtr<UWorld>>& GetForeignWorlds() const { return ForeignWorlds; }
+ 	FGuid GetModificationKey() const { return ModificationKey; }
+ #endif
+diff --git a/Engine/Source/Runtime/Landscape/Classes/LandscapeSplinesComponent.h b/Engine/Source/Runtime/Landscape/Classes/LandscapeSplinesComponent.h
+index 4fc9a22e6..5ebdb26b2 100644
+--- a/Engine/Source/Runtime/Landscape/Classes/LandscapeSplinesComponent.h
++++ b/Engine/Source/Runtime/Landscape/Classes/LandscapeSplinesComponent.h
+@@ -163,6 +163,10 @@ public:
+ 	const TArray<TObjectPtr<ULandscapeSplineSegment>>& GetSegments() const { return Segments; }
+ 	TArray<TObjectPtr<ULandscapeSplineSegment>>& GetSegments() { return Segments; }
+ 
++#if WITH_EDITORONLY_DATA
++	bool IsUsingEditorMesh(const USplineMeshComponent* SplineMeshComponent) const;
++#endif // WITH_EDITORONLY_DATA
++
+ #if WITH_EDITOR
+ 	void RequestSplineLayerUpdate();
+ 
+@@ -206,8 +210,6 @@ public:
+ 
+ 	void AutoFixMeshComponentErrors(UWorld* OtherWorld);
+ 
+-	bool IsUsingEditorMesh(const USplineMeshComponent* SplineMeshComponent) const;
+-
+ 	bool IsUsingLayerInfo(const ULandscapeLayerInfoObject* LayerInfo) const;
+ 
+ 	// Iterates throug a copy of the ControlPoints list.
+diff --git a/Engine/Source/Runtime/Landscape/Private/Landscape.cpp b/Engine/Source/Runtime/Landscape/Private/Landscape.cpp
+index 01ac28fcb..cff03f65f 100644
+--- a/Engine/Source/Runtime/Landscape/Private/Landscape.cpp
++++ b/Engine/Source/Runtime/Landscape/Private/Landscape.cpp
+@@ -1662,11 +1662,11 @@ ALandscapeProxy::ALandscapeProxy(const FObjectInitializer& ObjectInitializer)
+ 
+ #if WITH_EDITORONLY_DATA
+ ALandscape::FLandscapeEdModeInfo::FLandscapeEdModeInfo()
+-	: ViewMode(ELandscapeViewMode::Invalid)
++	: ViewMode(0)
+ 	, ToolTarget(ELandscapeToolTargetType::Invalid)
+ {
+ }
+-#endif
++#endif // WITH_EDITORONLY_DATA
+ 
+ ALandscape::ALandscape(const FObjectInitializer& ObjectInitializer)
+ 	: Super(ObjectInitializer)
+@@ -2347,7 +2347,7 @@ TArray<FWeightmapLayerAllocationInfo>& ULandscapeComponent::GetCurrentRuntimeWei
+ 	return bIsMobile ? MobileWeightmapLayerAllocations : WeightmapLayerAllocations;
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ 
+ FLandscapeLayerComponentData* ULandscapeComponent::GetEditingLayer()
+ {
+@@ -2369,6 +2369,9 @@ const FLandscapeLayerComponentData* ULandscapeComponent::GetEditingLayer() const
+ 	return nullptr;
+ }
+ 
++#endif // WITH_EDITORONLY_DATA
++
++#if WITH_EDITOR
+ void ULandscapeComponent::CopyFinalLayerIntoEditingLayer(FLandscapeEditDataInterface& DataInterface, TSet<UTexture2D*>& ProcessedHeightmaps)
+ {
+ 	Modify();
+@@ -2404,7 +2407,9 @@ void ULandscapeComponent::CopyFinalLayerIntoEditingLayer(FLandscapeEditDataInter
+ 		DataInterface.CopyTextureFromWeightmap(EditingWeightmapTextures[AllocInfo.WeightmapTextureIndex], AllocInfo.WeightmapTextureChannel, this, AllocInfo.LayerInfo, 0);
+ 	}
+ }
++#endif
+ 
++#if WITH_EDITORONLY_DATA
+ FGuid ULandscapeComponent::GetEditingLayerGUID() const
+ {
+ 	ALandscape* Landscape = GetLandscapeActor();
+@@ -2426,6 +2431,9 @@ FLandscapeLayerComponentData* ULandscapeComponent::GetLayerData(const FGuid& InL
+ 	return LayersData.Find(InLayerGuid);
+ }
+ 
++#endif // WITH_EDITORONLY_DATA
++
++#if WITH_EDITOR
+ void ULandscapeComponent::ForEachLayer(TFunctionRef<void(const FGuid&, struct FLandscapeLayerComponentData&)> Fn)
+ {
+ 	for (auto& Pair : LayersData)
+diff --git a/Engine/Source/Runtime/Landscape/Private/LandscapeBlueprintBrushBase.cpp b/Engine/Source/Runtime/Landscape/Private/LandscapeBlueprintBrushBase.cpp
+index 6aebe381e..dfb32a519 100644
+--- a/Engine/Source/Runtime/Landscape/Private/LandscapeBlueprintBrushBase.cpp
++++ b/Engine/Source/Runtime/Landscape/Private/LandscapeBlueprintBrushBase.cpp
+@@ -23,9 +23,9 @@
+ 
+ #define LOCTEXT_NAMESPACE "Landscape"
+ 
+-#if WITH_EDITOR
+ static const uint32 InvalidLastRequestLayersContentUpdateFrameNumber = 0;
+ 
++#if WITH_EDITOR
+ static TAutoConsoleVariable<int32> CVarLandscapeBrushPadding(
+ 	TEXT("landscape.BrushFramePadding"),
+ 	5,
+diff --git a/Engine/Source/Runtime/Landscape/Private/LandscapeCollision.cpp b/Engine/Source/Runtime/Landscape/Private/LandscapeCollision.cpp
+index 363fe68de..5c5b619bd 100644
+--- a/Engine/Source/Runtime/Landscape/Private/LandscapeCollision.cpp
++++ b/Engine/Source/Runtime/Landscape/Private/LandscapeCollision.cpp
+@@ -768,11 +768,17 @@ FPrimitiveSceneProxy* ULandscapeHeightfieldCollisionComponent::CreateSceneProxy(
+ 	};
+ 
+ 	FLandscapeHeightfieldCollisionComponentSceneProxy* Proxy = nullptr;
+-	if (ULandscapeSubsystem* LandscapeSubsystem = this->GetWorld()->GetSubsystem<ULandscapeSubsystem>(); 
++
++#if WITH_EDITOR
++	if (ULandscapeSubsystem* LandscapeSubsystem = this->GetWorld()->GetSubsystem<ULandscapeSubsystem>();
+ 		LandscapeSubsystem && !LandscapeSubsystem->AnyViewShowCollisions())
+ 	{
+ 		return Proxy;
+ 	}
++#else
++	return Proxy;
++#endif
++
+ 	
+ 	if (HeightfieldRef.IsValid() && IsValidRef(HeightfieldRef))
+ 	{
+diff --git a/Engine/Source/Runtime/Landscape/Private/LandscapeEditLayers.cpp b/Engine/Source/Runtime/Landscape/Private/LandscapeEditLayers.cpp
+index a379275d4..2b88d66b5 100644
+--- a/Engine/Source/Runtime/Landscape/Private/LandscapeEditLayers.cpp
++++ b/Engine/Source/Runtime/Landscape/Private/LandscapeEditLayers.cpp
+@@ -11852,7 +11852,7 @@ void ALandscapeProxy::FinishDestroy()
+ 	Super::FinishDestroy();
+ }
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ bool ALandscapeProxy::CanHaveLayersContent() const
+ {
+ 	if (HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject))
+@@ -11868,6 +11868,10 @@ bool ALandscapeProxy::CanHaveLayersContent() const
+ 	return false;
+ }
+ 
++#endif // WITH_EDITORONLY_DATA
++
++#if WITH_EDITOR
++
+ bool ALandscapeProxy::HasLayersContent() const
+ {
+ 	return bHasLayersContent || (GetLandscapeActor() != nullptr && GetLandscapeActor()->HasLayersContent());
+@@ -12892,6 +12896,15 @@ bool ALandscape::IsEditingLayerReservedForSplines() const
+ 	return false;
+ }
+ 
++void ALandscape::SetGrassUpdateEnabled(bool bInGrassUpdateEnabled)
++{
++#if WITH_EDITORONLY_DATA
++	bGrassUpdateEnabled = bInGrassUpdateEnabled;
++#endif
++}
++#endif // WITH_EDITOR
++
++#if WITH_EDITORONLY_DATA
+ void ALandscape::SetEditingLayer(const FGuid& InLayerGuid)
+ {
+ 	ensure(CanHaveLayersContent());
+@@ -12906,18 +12919,13 @@ void ALandscape::SetEditingLayer(const FGuid& InLayerGuid)
+ 	EditingLayer = InLayerGuid;
+ }
+ 
+-void ALandscape::SetGrassUpdateEnabled(bool bInGrassUpdateEnabled)
+-{
+-#if WITH_EDITORONLY_DATA
+-	bGrassUpdateEnabled = bInGrassUpdateEnabled;
+-#endif
+-}
+-
+ const FGuid& ALandscape::GetEditingLayer() const
+ {
+ 	return EditingLayer;
+ }
++#endif // WITH_EDITORONLY_DATA
+ 
++#if WITH_EDITOR
+ bool ALandscape::IsMaxLayersReached() const
+ {
+ 	return LandscapeEditLayers.Num() >= GetDefault<ULandscapeSettings>()->MaxNumberOfLayers;
+@@ -13247,16 +13255,15 @@ int32 ALandscape::GetBrushIndexForLayer(int32 InLayerIndex, ALandscapeBlueprintB
+ 
+ 	return INDEX_NONE;
+ }
++#endif // WITH_EDITOR
+ 
+-
++#if WITH_EDITORONLY_DATA
+ void ALandscape::OnBlueprintBrushChanged()
+ {
+-#if WITH_EDITORONLY_DATA
+-	LandscapeBlueprintBrushChangedDelegate.Broadcast();
+-	RequestLayersContentUpdateForceAll();
+-#endif
+ }
++#endif // WITH_EDITORONLY_DATA
+ 
++#if WITH_EDITOR
+ void ALandscape::OnLayerInfoSplineFalloffModulationChanged(ULandscapeLayerInfoObject* InLayerInfo)
+ {
+ 	ULandscapeInfo* LandscapeInfo = GetLandscapeInfo();
+diff --git a/Engine/Source/Runtime/Landscape/Private/LandscapeSplines.cpp b/Engine/Source/Runtime/Landscape/Private/LandscapeSplines.cpp
+index a790f5315..ec1455fdb 100644
+--- a/Engine/Source/Runtime/Landscape/Private/LandscapeSplines.cpp
++++ b/Engine/Source/Runtime/Landscape/Private/LandscapeSplines.cpp
+@@ -742,11 +742,16 @@ void ULandscapeSplinesComponent::AutoFixMeshComponentErrors(UWorld* OtherWorld)
+ 		StreamingSplinesComponent->DestroyOrphanedForeignControlPointMeshComponents(ThisOuterWorld);
+ 	}
+ }
++#endif
+ 
++#if WITH_EDITORONLY_DATA
+ bool ULandscapeSplinesComponent::IsUsingEditorMesh(const USplineMeshComponent* SplineMeshComponent) const
+ {
+ 	return SplineMeshComponent->GetStaticMesh() == SplineEditorMesh && SplineMeshComponent->bHiddenInGame;
+ }
++#endif // WITH_EDITORONLY_DATA
++
++#if WITH_EDITOR
+ 
+ void ULandscapeSplinesComponent::ForEachControlPoint(TFunctionRef<void(ULandscapeSplineControlPoint*)> Func)
+ {
+@@ -3551,9 +3556,11 @@ void ULandscapeSplineSegment::DeleteSplinePoints()
+ 		}
+ 	}
+ 
+-	ModificationKey.Invalidate();
+-	ForeignWorlds.Empty();
+-}
++		ModificationKey.Invalidate();
++		ForeignWorlds.Empty();
++	}
++
++#endif
+ 
+ FName ULandscapeSplineSegment::GetCollisionProfileName() const
+ {
+@@ -3564,8 +3571,6 @@ FName ULandscapeSplineSegment::GetCollisionProfileName() const
+ #endif
+ }
+ 
+-#endif
+-
+ void ULandscapeSplineSegment::FindNearest( const FVector& InLocation, float& t, FVector& OutLocation, FVector& OutTangent )
+ {
+ 	float TempOutDistanceSq;
+diff --git a/Engine/Source/Runtime/Landscape/Public/LandscapeSubsystem.h b/Engine/Source/Runtime/Landscape/Public/LandscapeSubsystem.h
+index e63dc6ab2..99ca80766 100644
+--- a/Engine/Source/Runtime/Landscape/Public/LandscapeSubsystem.h
++++ b/Engine/Source/Runtime/Landscape/Public/LandscapeSubsystem.h
+@@ -33,7 +33,7 @@ namespace UE::Landscape
+ #endif // WITH_EDITOR
+ } // end of namespace UE::Landscape
+ 
+-#if WITH_EDITOR
++#if WITH_EDITORONLY_DATA
+ struct FOnHeightmapStreamedContext
+ {
+ private:
+@@ -50,7 +50,7 @@ public:
+ };
+ 
+ DECLARE_MULTICAST_DELEGATE_OneParam(FOnHeightmapStreamedDelegate, const FOnHeightmapStreamedContext& context);
+-#endif // WITH_EDITOR
++#endif // WITH_EDITORONLY_DATA
+ 
+ UCLASS(MinimalAPI)
+ class ULandscapeSubsystem : public UTickableWorldSubsystem

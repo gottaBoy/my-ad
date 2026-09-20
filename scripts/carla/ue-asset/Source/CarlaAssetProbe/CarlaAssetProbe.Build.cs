@@ -16,7 +16,7 @@ public class CarlaAssetProbe : ModuleRules
             "CarlaUfbxLegacy", "HeadMountedDisplay", "InstallBundleManager", "MediaUtils",
             "MRMesh", "MoviePlayer", "MoviePlayerProxy", "MovieScene", "PreLoadScreen",
             "SessionServices", "SlateNullRenderer", "SlateRHIRenderer", "ProfileVisualizer",
-            "AutomationController", "AutomationWorker"
+            "AutomationController", "AutomationWorker", "ShaderPreprocessor", "ShaderFormatVectorVM"
         });
     }
 }

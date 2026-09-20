@@ -1,0 +1,19 @@
+diff --git a/Engine/Source/Runtime/CoreUObject/Private/UObject/Package.cpp b/Engine/Source/Runtime/CoreUObject/Private/UObject/Package.cpp
+index 7bb4a694b..0da580ca9 100644
+--- a/Engine/Source/Runtime/CoreUObject/Private/UObject/Package.cpp
++++ b/Engine/Source/Runtime/CoreUObject/Private/UObject/Package.cpp
+@@ -241,7 +241,13 @@ UMetaData* UPackage::GetMetaData()
+ 	// If there is no MetaData, try to find it.
+ 	if (LocalMetaData == nullptr)
+ 	{
+-		LocalMetaData = FindObjectFast<UMetaData>(this, FName(NAME_PackageMetaData));
++		// FindObjectFast routes through StaticFindObjectFast, which is illegal
++		// while a package save is in flight (Program targets save assets on the
++		// game thread without the editor's MetaData preallocation). The Safe
++		// variant skips the hash lookup during save and simply reports absence,
++		// letting us create the MetaData object below.
++		LocalMetaData = Cast<UMetaData>(StaticFindObjectFastSafe(
++			UMetaData::StaticClass(), this, FName(NAME_PackageMetaData)));
+ 
+ 		// If MetaData is null then it wasn't loaded by linker, so we have to create it.
+ 		if(LocalMetaData == nullptr)

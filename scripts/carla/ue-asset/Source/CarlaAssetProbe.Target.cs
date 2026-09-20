@@ -10,6 +10,7 @@ public class CarlaAssetProbeTarget : TargetRules
         LinkType = TargetLinkType.Monolithic;
         LaunchModuleName = "CarlaAssetProbe";
         bBuildDeveloperTools = false;
+        bForceDisableAutomationTests = true;
         bCompileAgainstEngine = true;
         bCompileAgainstEditor = false;
         bBuildWithEditorOnlyData = true;

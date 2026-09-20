@@ -1122,6 +1122,26 @@ DGX 原生 ARM64 Docker 内执行，每次最多一个 UBT 构建。已通过的
 多属性节点或动画/骨骼/Morph；这不删除默认 Editor 的相关功能。下一验收点
 仍是实际 `UStaticMesh` 生命周期，不能把共享层级 PASS 提升到 E1/Cook/传感器。
 
+### 9.20 2026-09-20 F2 资产保存/重载往返通过
+
+`make carla-asset` 现在跑通完整的非 Editor `UStaticMesh` 生命周期：ufbx 导入
+`multi-mesh.fbx` -> `BuildFromMeshDescriptions` 构建 -> `SavePackage` 落盘 ->
+`CollectGarbage` 卸载 -> `LoadPackage` 重载 -> `MeshDescription` 逐顶点比对 ->
+`BuildFromMeshDescriptions` 重建 -> CPU buffer 校验。2 个资产 saved/reloaded/
+rebuilt 全部通过，`native.json` `status=PASS`，8 项 checker 全 PASS
+（graph/build/architecture/linkage/native/sources/assets/prerequisite）。
+报告：`artifacts/carla/asset-20260920T123527Z-6S4kS5/stage-report.json`。
+
+引擎侧为支持非 Editor Program 加载引擎装饰资产（`/Engine/EditorMeshes/` 等）
+打了一组有界 patch：`UStaticMesh::Serialize` 在检测出 SpeedTree wind 段被
+editor 保存路径截断时跳过尾部并把流钳到 export 边界；`FStaticMaterial` 在此
+情况下不解析。这只影响 `/Engine/` 下编辑器资产，探针自身生成的资产不受影响。
+探针进程在写完 `native.json` 后通过 `_exit` 绕过引擎 shutdown 阶段的
+`LazySingleton` teardown 断言（已知非 Editor Program 限制，与资产正确性无关）。
+
+F2 仍不等于 E1/Cook/传感器通过；材质、碰撞、socket、LOD、骨骼/动画/Morph 和
+导出仍须独立验收。
+
 ## 最终判断
 
 ```text

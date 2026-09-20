@@ -1,0 +1,82 @@
+diff --git a/Engine/Source/Runtime/Engine/Private/Camera/CameraComponent.cpp b/Engine/Source/Runtime/Engine/Private/Camera/CameraComponent.cpp
+index 73622fb00..62d556ce0 100644
+--- a/Engine/Source/Runtime/Engine/Private/Camera/CameraComponent.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Camera/CameraComponent.cpp
+@@ -62,7 +62,10 @@ UCameraComponent::UCameraComponent(const FObjectInitializer& ObjectInitializer)
+ 	: Super(ObjectInitializer)
+ {
+ #if WITH_EDITORONLY_DATA
+-	if (!IsRunningCommandlet())
++	// Editor decoration meshes are only meaningful in the real Editor; Program
++	// targets that build with editor-only data but without Editor code cannot
++	// load these assets (their inline payload requires WITH_EDITOR serializers).
++	if (GIsEditor && !IsRunningCommandlet())
+ 	{
+ 		static ConstructorHelpers::FObjectFinder<UStaticMesh> EditorCameraMesh(TEXT("/Engine/EditorMeshes/MatineeCam_SM"));
+ 		CameraMesh = EditorCameraMesh.Object;
+@@ -109,7 +112,7 @@ void UCameraComponent::OnUpdateTransform(EUpdateTransformFlags UpdateTransformFl
+ 	Super::OnUpdateTransform(UpdateTransformFlags, Teleport);
+ }
+ 
+-#if WITH_EDITORONLY_DATA
++#if WITH_EDITOR
+ void UCameraComponent::PostEditChangeProperty(FPropertyChangedEvent & PropertyChangedEvent)
+ {
+ 	Super::PostEditChangeProperty(PropertyChangedEvent);
+@@ -122,7 +125,9 @@ void UCameraComponent::PostEditChangeProperty(FPropertyChangedEvent & PropertyCh
+ 
+ 	RefreshVisualRepresentation();
+ }
++#endif
+ 
++#if WITH_EDITORONLY_DATA
+ void UCameraComponent::AddReferencedObjects(UObject* InThis, FReferenceCollector& Collector)
+ {
+ 	UCameraComponent* This = CastChecked<UCameraComponent>(InThis);
+@@ -131,7 +136,9 @@ void UCameraComponent::AddReferencedObjects(UObject* InThis, FReferenceCollector
+ 
+ 	Super::AddReferencedObjects(InThis, Collector);
+ }
++#endif
+ 
++#if WITH_EDITOR
+ void UCameraComponent::OnComponentDestroyed(bool bDestroyingHierarchy)
+ {
+ 	Super::OnComponentDestroyed(bDestroyingHierarchy);
+@@ -145,7 +152,7 @@ void UCameraComponent::OnComponentDestroyed(bool bDestroyingHierarchy)
+ 		DrawFrustum->DestroyComponent();
+ 	}
+ }
+-#endif	// WITH_EDITORONLY_DATA
++#endif
+ 
+ #if WITH_EDITOR
+ FText UCameraComponent::GetFilmbackText() const
+diff --git a/Engine/Source/Runtime/Engine/Private/Components/SceneCaptureComponent.cpp b/Engine/Source/Runtime/Engine/Private/Components/SceneCaptureComponent.cpp
+index e96b79371..71b12645c 100644
+--- a/Engine/Source/Runtime/Engine/Private/Components/SceneCaptureComponent.cpp
++++ b/Engine/Source/Runtime/Engine/Private/Components/SceneCaptureComponent.cpp
+@@ -1134,7 +1134,10 @@ UPlanarReflectionComponent::UPlanarReflectionComponent(const FObjectInitializer&
+ 	PlanarReflectionId = NextPlanarReflectionId;
+ 
+ #if WITH_EDITORONLY_DATA
+-	if (!IsRunningCommandlet())
++	// Editor decoration meshes are only meaningful in the real Editor; Program
++	// targets that build with editor-only data but without Editor code cannot
++	// load these assets (their inline payload requires WITH_EDITOR serializers).
++	if (GIsEditor && !IsRunningCommandlet())
+ 	{
+ 		static ConstructorHelpers::FObjectFinder<UStaticMesh> EditorMesh(TEXT("/Engine/EditorMeshes/PlanarReflectionPlane.PlanarReflectionPlane"));
+ 		CaptureMesh = EditorMesh.Object;
+@@ -1298,7 +1301,10 @@ USceneCaptureComponentCube::USceneCaptureComponentCube(const FObjectInitializer&
+ 	bCaptureRotation = false;
+ 
+ #if WITH_EDITORONLY_DATA
+-	if (!IsRunningCommandlet())
++	// Editor decoration meshes are only meaningful in the real Editor; Program
++	// targets that build with editor-only data but without Editor code cannot
++	// load these assets (their inline payload requires WITH_EDITOR serializers).
++	if (GIsEditor && !IsRunningCommandlet())
+ 	{
+ 		static ConstructorHelpers::FObjectFinder<UStaticMesh> EditorMesh(TEXT("/Engine/EditorMeshes/MatineeCam_SM"));
+ 		CaptureMesh = EditorMesh.Object;

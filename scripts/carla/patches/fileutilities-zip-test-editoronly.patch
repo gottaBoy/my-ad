@@ -1,0 +1,20 @@
+diff --git a/Engine/Source/Developer/FileUtilities/Private/Tests/ZipArchiveTest.cpp b/Engine/Source/Developer/FileUtilities/Private/Tests/ZipArchiveTest.cpp
+index 35374fc6c..4d817461a 100644
+--- a/Engine/Source/Developer/FileUtilities/Private/Tests/ZipArchiveTest.cpp
++++ b/Engine/Source/Developer/FileUtilities/Private/Tests/ZipArchiveTest.cpp
+@@ -8,7 +8,7 @@
+ #include "FileUtilities/ZipArchiveWriter.h"
+ #include "FileUtilities/ZipArchiveReader.h"
+ 
+-#if WITH_DEV_AUTOMATION_TESTS
++#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
+ 
+ #if WITH_ENGINE
+ 
+@@ -80,4 +80,4 @@ bool FZipArchiveTest::RunTest(const FString& InParameter)
+ 
+ #endif // WITH_ENGINE
+ 
+-#endif // WITH_DEV_AUTOMATION_TESTS
+\ No newline at end of file
++#endif // WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
