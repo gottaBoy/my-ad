@@ -262,7 +262,7 @@ index fbfe1dce1..8dce882b5 100644
  #endif // WITH_EDITOR
  
 diff --git a/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequence.h b/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequence.h
-index 46b359e01..fcdc1f451 100644
+index 46b359e01..6cdd52ea6 100644
 --- a/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequence.h
 +++ b/Engine/Source/Runtime/Engine/Classes/Animation/AnimSequence.h
 @@ -586,14 +586,14 @@ public:
@@ -290,15 +290,23 @@ index 46b359e01..fcdc1f451 100644
  
  	/** 
  	 * Add validation check to see if it's being ready to play or not
-@@ -696,7 +697,6 @@ public:
+@@ -695,8 +696,14 @@ public:
+ 	// Get a pointer to the data for a given Anim Notify
  	ENGINE_API uint8* FindSyncMarkerPropertyData(int32 SyncMarkerIndex, FArrayProperty*& ArrayProperty);
  
- 	virtual int32 GetMarkerUpdateCounter() const { return MarkerDataUpdateCounter; }
--#endif
+-	virtual int32 GetMarkerUpdateCounter() const { return MarkerDataUpdateCounter; }
++	virtual int32 GetMarkerUpdateCounter() const
++	{
++#if WITH_EDITORONLY_DATA
++		return MarkerDataUpdateCounter;
++#else
++		return 0;
+ #endif
++	}
  
  	/** Sort the sync markers array by time, earliest first. */
  	ENGINE_API void SortSyncMarkers();
-@@ -729,16 +729,6 @@ public:
+@@ -729,16 +736,6 @@ public:
  	ENGINE_API virtual bool GetEnableRootMotionSettingFromMontage() const override;
  
  #if WITH_EDITOR
@@ -315,7 +323,7 @@ index 46b359e01..fcdc1f451 100644
  	// Is this animation valid for baking into additive
  	ENGINE_API bool CanBakeAdditive() const;
  
-@@ -792,10 +782,25 @@ public:
+@@ -792,10 +789,25 @@ public:
  		PRAGMA_ENABLE_DEPRECATION_WARNINGS
  	}
  
@@ -341,7 +349,7 @@ index 46b359e01..fcdc1f451 100644
  private:
  	/**
  	* Get Bone Transform of the animation for the Time given, relative to Parent for all RequiredBones
-@@ -896,9 +901,12 @@ protected:
+@@ -896,9 +908,12 @@ protected:
  
  	ENGINE_API void DeleteBoneAnimationData();
  	ENGINE_API void DeleteDeprecatedRawAnimationData();
@@ -355,7 +363,7 @@ index 46b359e01..fcdc1f451 100644
  
  protected:
  	UPROPERTY(VisibleAnywhere, AssetRegistrySearchable, Category = "Animation")
-@@ -953,9 +961,13 @@ public:
+@@ -953,9 +968,13 @@ public:
  	
  	// Synchronous caching of compressed animation data for provided target platform
  	ENGINE_API FCompressedAnimSequence& CacheDerivedData(const ITargetPlatform* TargetPlatform);
@@ -904,7 +912,7 @@ index 546465ffa..4a3788830 100644
  #undef LOCTEXT_NAMESPACE
 -
 diff --git a/Engine/Source/Runtime/Engine/Private/Animation/AnimSequence.cpp b/Engine/Source/Runtime/Engine/Private/Animation/AnimSequence.cpp
-index 58aa6e63b..3f7025735 100644
+index 58aa6e63b..057b3f1eb 100644
 --- a/Engine/Source/Runtime/Engine/Private/Animation/AnimSequence.cpp
 +++ b/Engine/Source/Runtime/Engine/Private/Animation/AnimSequence.cpp
 @@ -517,6 +517,10 @@ void UAnimSequence::ClearAllCachedCookedPlatformData()
@@ -951,11 +959,12 @@ index 58aa6e63b..3f7025735 100644
  void UAnimSequence::ResetAnimation()
  {
  	// clear everything. Making new animation, so need to reset all the things that belong here
-@@ -2243,14 +2247,7 @@ void UAnimSequence::ResetAnimation()
+@@ -2243,15 +2247,9 @@ void UAnimSequence::ResetAnimation()
  	UniqueMarkerNames.Empty();
  	AnimNotifyTracks.Empty();
  }
--
++#endif
+ 
 -void UAnimSequence::DeleteDeprecatedRawAnimationData()
 -{
 -	PRAGMA_DISABLE_DEPRECATION_WARNINGS
@@ -963,14 +972,17 @@ index 58aa6e63b..3f7025735 100644
 -	SourceRawAnimationData_DEPRECATED.Empty();
 -	PRAGMA_ENABLE_DEPRECATION_WARNINGS
 -}
-+#endif
- 
+-
++#if WITH_EDITORONLY_DATA
  void UAnimSequence::DeleteNotifyTrackData()
  {
-@@ -2262,12 +2259,21 @@ void UAnimSequence::DeleteNotifyTrackData()
+ 	AuthoredSyncMarkers.Empty();
+@@ -2261,13 +2259,23 @@ void UAnimSequence::DeleteNotifyTrackData()
+ 
  	InitializeNotifyTrack();
  }
- 
++#endif
++
 +#if WITH_EDITOR
 +void UAnimSequence::DeleteDeprecatedRawAnimationData()
 +{
@@ -979,7 +991,7 @@ index 58aa6e63b..3f7025735 100644
 +	SourceRawAnimationData_DEPRECATED.Empty();
 +	PRAGMA_ENABLE_DEPRECATION_WARNINGS
 +}
-+
+ 
  void UAnimSequence::DeleteBoneAnimationData()
  {
  	ValidateModel();
@@ -990,7 +1002,7 @@ index 58aa6e63b..3f7025735 100644
  
  bool UAnimSequence::IsValidAdditive() const		
  { 
-@@ -5114,4 +5120,3 @@ void GatherAnimSequenceStats(FOutputDevice& Ar)
+@@ -5114,4 +5122,3 @@ void GatherAnimSequenceStats(FOutputDevice& Ar)
  
  
  #undef LOCTEXT_NAMESPACE 
