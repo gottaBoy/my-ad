@@ -1144,6 +1144,96 @@ F2 仍不等于 E1/Cook/传感器通过；材质、碰撞、socket、LOD、骨�
 
 ## 最终判断
 
+### 9.21 2026-09-20 G4 启动崩溃根因定位（WorldGridMaterial 序列化越界）
+
+`make carla-startup-probe` 在读取 `/Engine/EngineMaterials/WorldGridMaterial`
+（30169 字节）时于 `AsyncLoading.cpp:8534` 触发
+`CurrentPos + Count <= TotalSizeOrMaxInt64IfNotReady()` 断言，最后停在
+`CurrentPos=30166 Count=4`，以 SIGTRAP/139 退出。
+
+本轮用 DWARF 行号映射 + 反汇编 + gdb 在 `PackageFileSummary.cpp` 多处断点，
+把根因收窄到**文件本身的版本号与内容布局不匹配**：
+
+- gdb 实测：`Sum.FileVersionUE = {FileVersionUE4=522, FileVersionUE5=1004}`，
+  `ToValue()=1004`；`BaseArchive.Tell()` 在读 GenerationCount 前=330、
+  读后=334（只前进 4 字节，**没有**读 16 字节 PersistentGuid）。
+- 文件头实测：`FileVersionUE4=-8`（legacy 格式标记）、`FileVersionUE5=864`。
+- reader 读到的 `GenerationCount=2075603473=0x7bb73211`，正是文件 [330:334]
+  的字节（PersistentGuid 的前 4 字节）；而正确值 `1` 在 [346:350]。
+- 反汇编确认 reader 在 Guid（262 行）后直接读 GenerationCount（291 行），
+  PG 块（265-288）被跳过，行为与 `WITH_EDITORONLY_DATA=0` 一致。
+
+**结论**：reader 行为是**正确**的——它按 `FileVersionUE5=1004` 判断
+`>= ADD_SOFTOBJECTPATH_LIST(1008)` 为假，跳过 SoftObjectPaths；按
+`>= VER_UE4_ADDED_PACKAGE_OWNER(522)` 为真但因 `WITH_EDITORONLY_DATA=0`
+跳过 PersistentGuid，于是在 330 处读 GenerationCount。问题在于**文件本身
+是用 UE5=1004 的版本号写的，但内容布局却是 864（含 PersistentGuid、
+GenerationCount 在 346）**。这是一个版本号被写错/被改写过的资源文件，
+导致 reader 按错误的版本号解析，GenerationCount 读到垃圾值，最终越界。
+
+**为什么 x86 不崩**：x86 Editor/Game 读同一个文件时，`WITH_EDITORONLY_DATA=1`
+（Editor）或同样的版本判断路径，PersistentGuid 被读出（16 字节），
+GenerationCount 正好落在 346=1。ARM64 Server（`WITH_EDITORONLY_DATA=0`）
+跳过 PG，于是错位。换言之，这个文件**只能在读 PersistentGuid 的构建下**
+正确解析——它实际上是一个 editor-only 布局的文件被标成了 game 版本号。
+
+**修复方向**：
+1. 不读引擎源码里这个未烘焙的 `WorldGridMaterial`：为 Game/Server 提供
+   cooked 内容或正确的 premade asset registry（`Failed to load premade asset
+   registry` 是先兆），让 Game 走 cooked 路径而非逐个序列化 editor 资产；
+2. 若必须读未烘焙内容，则需要一个 `WITH_EDITORONLY_DATA=1` 的 reader 或
+   在加载引擎装饰资产时走与 Editor 一致的序列化路径——这与 9.20 节 F2 为
+   `/Engine/EditorMeshes/` 打的有界 patch 是同一类问题。
+
+在修复并重编通过 `make carla-startup-probe`（exit=0）之前，G4 仍 BLOCKED，
+不能说 DGX 已支持 CARLA Server。
+
+### 9.22 2026-09-21 G4 三层修复验证与最终根因（编辑器资产 vs Server 构建）
+
+在 9.21 的基础上继续打了三层修复并逐层用 gdb 验证，最终确认了本质约束：
+
+1. **PackageFileSummary PG 修复（已 commit `4fc36ce8a`）**：
+   `WITH_EDITORONLY_DATA=0` 加载路径下读入并丢弃 PersistentGuid /
+   OwnerPersistentGuid，保持流同步。修复后 summary 完全读对：
+   gdb 实测 `Tell()=346`、`GenerationCount=1`、`NameCount=105`、
+   `ImportCount=25`、`ExportCount=47`。
+
+2. **EditorContent 包 gate 回退（同 commit）**：新增
+   `carla.AllowEditorContentInServerBuilds` cvar，绕过
+   `LinkerLoad.cpp:1471` 的
+   `!HasEditorOnlyData() && !PKG_FilterEditorOnly → LINKER_Failed` 硬检查
+   （该检查把 `WorldGridMaterial` 判为"含编辑器数据，拒绝加载"，日志被
+   `SuppressLoggingToOutputLog` 静默，是 9.21 里 `Failed to find object`
+   的直接原因）。绕过成功，loader 进入 import map 读取。
+
+3. **`GForceLoadEditorOnly` scoped 强制（同 commit，但作用域不完整）**：
+   在 `SerializePackageFileSummaryInternal` 内强制 tagged 序列化保留
+   编辑器属性。但该 flag 的作用域只覆盖 summary，不覆盖后续 Tick 阶段的
+   import/export map 和属性反序列化，所以当前是无效半成品。
+
+**最终根因**：三层修复后崩溃变为
+`SerializeImportMap → FObjectImport::operator<< → BadNameIndexError`
+（index=-22，name map 仅 105 条）。import map 的第一个 FName 就读到
+0x117c4e 这种垃圾偏移，说明 header 之后的 map 区域布局与文件对不上。
+这不是单点 bug，而是**未 cook 编辑器资产与 `WITH_EDITORONLY_DATA=0`
+Server 构建在所有 header 之后的 map 布局上系统性不兼容**。逐个字段对齐
+是脆弱的逆向工程，且即便打通也不被 UE 支持。
+
+**结论**：ARM64 Server 直接加载未 cook 引擎内容这条路**走不通**。
+UE 的架构是 Game/Server 只认 cooked（`PKG_FilterEditorOnly`）内容。
+
+**可行路线**：
+- **A（当前推进）**：构建 ARM64 `CarlaUnrealEditor`，用它 cook 出
+  `PKG_FilterEditorOnly` 资产，Server 加载 cooked 包。Editor 目前卡在缺
+  aarch64 FBX SDK（`aarch64-unknown-linux-gnueabi/libfbxsdk.so`）和 USD
+  依赖解析；cook 已有资产本身不需要 FBX 导入，可裁剪 Interchange/Fbx/
+  USD/GLTFExporter 插件绕过。
+- **B（备选）**：在 x86_64 主机用同版本源码 cook，交付 ARM64 运行包。
+  当前环境无 x86_64 构建机，不现实。
+
+上述三处引擎 patch 已 commit 保留为探索证据，cook 路线打通后若无必要
+可 revert。
+
 ```text
 Docker 化构建                 可行
 DGX ARM64 构建实验            值得做，但尚未打通

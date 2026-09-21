@@ -78,7 +78,7 @@ command=(
   -nullrhi -nosound -unattended -NoSplash -notraceserver -traceautostart=0
   -stdout -FullStdOutLogOutput -AllowStdOutLogVerbosity
   "-abslog=${run_dir}/unreal.log"
-  "-ExecCmds=quit"
+  "-ExecCmds=carla.AllowEditorContentInServerBuilds 1,quit"
 )
 printf "%q " "${command[@]}" > "${run_dir}/command.txt"
 printf "\n" >> "${run_dir}/command.txt"
