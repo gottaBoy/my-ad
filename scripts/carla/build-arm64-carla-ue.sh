@@ -63,9 +63,12 @@ grep -q "1.24.0" "${run_dir}/ispc-version.log"
 
 run_step rebuild-ubt dotnet build "${ue_dir}/Engine/Source/Programs/UnrealBuildTool/UnrealBuildTool.csproj" \
   -c Development -v quiet
+run_step build-scw timeout "${CARLA_SCW_BUILD_TIMEOUT:-1800}" \
+  bash "${ue_dir}/Engine/Build/BatchFiles/Linux/Build.sh" \
+  ShaderCompileWorker Linux Development -NoDumpSyms "-MaxParallelActions=${jobs}"
 run_step build timeout "${CARLA_UE_BUILD_TIMEOUT:-7200}" \
   bash "${ue_dir}/Engine/Build/BatchFiles/Linux/Build.sh" CarlaUnreal LinuxArm64 Development \
-  "-project=${project}" -game -buildscw "-MaxParallelActions=${jobs}"
+  "-project=${project}" -game -buildscw -NoDumpSyms "-MaxParallelActions=${jobs}"
 
 step=artifacts
 find "${carla_dir}" "${ue_dir}/Engine/Binaries" -type f -name CarlaUnreal -perm /111 \

@@ -45,8 +45,10 @@ class CarlaIspcContractTest(unittest.TestCase):
 
     def test_carla_ue_build_script_requires_arm64_ispc(self):
         script = (REPO_ROOT / "scripts/carla/build-arm64-carla-ue.sh").read_text()
+        self.assertIn("ShaderCompileWorker Linux Development -NoDumpSyms", script)
         self.assertIn("CarlaUnreal LinuxArm64 Development", script)
         self.assertIn("-buildscw", script)
+        self.assertIn("-NoDumpSyms", script)
         self.assertIn("ARM aarch64", script)
         self.assertIn("CarlaUnreal executable was not produced", script)
         self.assertIn("--target carla-server", script)

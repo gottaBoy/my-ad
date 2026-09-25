@@ -2,10 +2,11 @@
 """Independent CARLA RPC/sensor gates; requires an idle, exclusively ticked world.
 
 The CLI requires Docker on ARM64 and --allow-world-mutation. It does not load
-maps, change weather, control existing actors, or manage Traffic Manager. It
-temporarily changes world settings and, in sensors mode, creates/moves two
-sensors. Global time advances cannot be undone; settings and owned actors are
-restored/removed in finally. Concurrent ticking is a gate failure.
+maps, change weather, or control existing actors. It temporarily changes world
+settings and, in sensors mode, creates/moves two sensors; in actors mode, it
+creates one autopiloted vehicle, one AI walker and its controller, and uses
+Traffic Manager. Global time advances cannot be undone; settings and owned
+actors are restored/removed in finally. Concurrent ticking is a gate failure.
 
 run_gate(..., api=FakeCarla) is for harness unit tests only: injected runs use
 harness-test stage IDs/scopes and cannot produce a production stage PASS.
@@ -44,12 +45,17 @@ STAGES = {
     "sensors": ("carla-runtime-sensors",
                 "Endpoint CARLA RGB/LiDAR alignment/payloads and observed client architecture; "
                 "server architecture/build, GPU/backend and ROS/Autoware unverified"),
+    "actors": ("carla-runtime-actors",
+               "Endpoint CARLA Traffic Manager vehicle motion, AI walker motion, and observed client architecture; "
+               "server architecture/build, sensors and ROS/Autoware unverified"),
 }
 STEP_SECONDS = 0.05
 WARMUP_TICKS = 10
 WIDTH, HEIGHT = 320, 240
 QUEUE_SIZE = 32
 MAX_SENSOR_BYTES = 16 * 1024 * 1024
+ACTOR_WARMUP_TICKS = 2
+MIN_TRAVELLED_METERS = 0.1
 SETTINGS_FIELDS = (
     "synchronous_mode", "no_rendering_mode", "fixed_delta_seconds", "substepping",
     "max_substep_delta_time", "max_substeps", "max_culling_distance",
@@ -207,17 +213,30 @@ class AlignedQueue:
     def __init__(self):
         self.queue = queue.Queue(maxsize=QUEUE_SIZE)
         self.overflow = threading.Event()
+        self.failure = None
         self.closed = threading.Event()
         self.stale = 0
 
     def __call__(self, packet):
-        if not self.closed.is_set():
-            try:
-                self.queue.put_nowait(packet)
-            except queue.Full:
-                self.overflow.set()
+        if self.failure is not None:
+            # PythonCarla's callback thread is pooled; keep the first error
+            # sticky because later callbacks may not be invoked after failure.
+            return
+        if self.overflow.is_set():
+            self.failure = ValueError(
+                "sensor queue overflow detected before packet enqueue")
+            return
+        if self.closed.is_set():
+            return
+        try:
+            self.queue.put_nowait(packet)
+        except queue.Full:
+            self.overflow.set()
+            self.failure = ValueError(
+                f"sensor queue overflow while receiving frame {packet.frame}")
 
     def frame(self, expected, timeout):
+        self._check_failure()
         deadline = time.monotonic() + timeout
         while True:
             _require(not self.overflow.is_set(), "sensor queue overflow")
@@ -235,6 +254,14 @@ class AlignedQueue:
             _require(not self.overflow.is_set(), "sensor queue overflow")
             return packet
 
+    def _check_failure(self):
+        if self.failure is not None:
+            raise self.failure
+        if self.overflow.is_set():
+            raise ValueError("sensor queue overflow")
+
+    check_failure = _check_failure
+
 
 def _settings_view(settings):
     result = {name: getattr(settings, name) for name in SETTINGS_FIELDS}
@@ -248,6 +275,25 @@ def _pose(api, base, yaw_offset, pitch):
     return api.Transform(
         api.Location(x=base.location.x, y=base.location.y, z=base.location.z + 2.5),
         api.Rotation(pitch=pitch, yaw=base.rotation.yaw + yaw_offset, roll=0.0))
+
+
+def _location_xyz(location):
+    return (float(location.x), float(location.y), float(location.z))
+
+
+def _travelled_meters(start, end):
+    x0, y0, z0 = _location_xyz(start)
+    x1, y1, z1 = _location_xyz(end)
+    return math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2 + (z1 - z0) ** 2)
+
+
+def _velocity_meters_per_second(velocity):
+    return math.sqrt(float(velocity.x) ** 2 + float(velocity.y) ** 2 + float(velocity.z) ** 2)
+
+
+def _blueprint_attribute(blueprint, name, value, type_id):
+    _require(blueprint.has_attribute(name), f"{type_id} missing attribute {name}")
+    blueprint.set_attribute(name, value)
 
 
 def _spawn_sensors(api, world, owned, streams, raw):
@@ -266,8 +312,7 @@ def _spawn_sensors(api, world, owned, streams, raw):
                                 ("lidar", "sensor.lidar.ray_cast", 0.0)):
         blueprint = blueprints.find(type_id)
         for key, value in attributes[name].items():
-            _require(blueprint.has_attribute(key), f"{type_id} missing attribute {key}")
-            blueprint.set_attribute(key, value)
+            _blueprint_attribute(blueprint, key, value, type_id)
         actor = world.spawn_actor(blueprint, _pose(api, base, 0, pitch))
         _require(actor is not None, f"could not spawn {type_id}")
         owned.append(actor)
@@ -280,10 +325,99 @@ def _spawn_sensors(api, world, owned, streams, raw):
     return base
 
 
+def _pick_vehicle_blueprint(blueprints):
+    candidates = [blueprint for blueprint in blueprints.filter("vehicle.*")
+                  if blueprint.id.startswith("vehicle.tesla.model3")]
+    candidates = candidates or list(blueprints.filter("vehicle.*"))
+    _require(bool(candidates), "map has no vehicle blueprints")
+    return candidates[0]
+
+
+def _pick_walker_blueprint(blueprints):
+    candidates = [blueprint for blueprint in blueprints.filter("walker.pedestrian.*")
+                  if blueprint.id.startswith("walker.pedestrian.0001")]
+    candidates = candidates or list(blueprints.filter("walker.pedestrian.*"))
+    _require(bool(candidates), "map has no walker blueprints")
+    return candidates[0]
+
+
+def _spawn_actors(api, client, world, owned, raw):
+    blueprints = world.get_blueprint_library()
+    spawn_points = world.get_map().get_spawn_points()
+    _require(bool(spawn_points), "actors mode requires map vehicle spawn points")
+    vehicle_point = spawn_points[0]
+    vehicle_blueprint = _pick_vehicle_blueprint(blueprints)
+    for attribute, value in (("role_name", "lavapipe_actor_gate"),):
+        if vehicle_blueprint.has_attribute(attribute):
+            vehicle_blueprint.set_attribute(attribute, value)
+    vehicle = world.spawn_actor(
+        vehicle_blueprint,
+        api.Transform(vehicle_point.location, vehicle_point.rotation))
+    _require(vehicle is not None, "could not spawn Traffic Manager vehicle")
+    owned.append(vehicle)
+    raw["owned_actor_ids"].append(vehicle.id)
+
+    traffic_manager = client.get_trafficmanager()
+    traffic_manager_port = traffic_manager.get_port()
+    traffic_manager.set_synchronous_mode(True)
+    traffic_manager.set_random_device_seed(1729)
+    _require(vehicle.set_autopilot(True, traffic_manager_port) is not False,
+             "Traffic Manager did not accept vehicle registration")
+
+    origin = world.get_random_location_from_navigation()
+    _require(origin is not None, "walker navigation mesh is unavailable")
+    destination = None
+    for _ in range(20):
+        candidate = world.get_random_location_from_navigation()
+        candidate_distance = math.dist(_location_xyz(candidate), _location_xyz(origin)) \
+            if candidate is not None else -1.0
+        if candidate_distance >= 10.0:
+            destination = candidate
+            break
+    _require(destination is not None, "walker navigation has no destination at least 10m away")
+
+    walker_blueprint = _pick_walker_blueprint(blueprints)
+    if walker_blueprint.has_attribute("is_invincible"):
+        walker_blueprint.set_attribute("is_invincible", "false")
+    walker_spawn = api.Location(x=origin.x, y=origin.y, z=origin.z + 1.0)
+    walker = world.spawn_actor(walker_blueprint, api.Transform(walker_spawn, api.Rotation()))
+    _require(walker is not None, "could not spawn walker")
+    owned.append(walker)
+    raw["owned_actor_ids"].append(walker.id)
+
+    controller_blueprint = blueprints.find("controller.ai.walker")
+    controller = world.spawn_actor(
+        controller_blueprint, api.Transform(api.Location(), api.Rotation()), attach_to=walker)
+    _require(controller is not None, "could not spawn walker AI controller")
+    owned.append(controller)
+    raw["owned_actor_ids"].append(controller.id)
+    # CARLA registers the attachment with the episode on the next tick.
+    world.tick(10.0)
+    controller.start()
+    _require(controller.go_to_location(destination) is not False,
+             "walker AI controller rejected navigation destination")
+    _require(controller.set_max_speed(1.4) is not False,
+             "walker AI controller rejected maximum speed")
+
+    raw["actors"] = {
+        "vehicle_type_id": vehicle_blueprint.id,
+        "walker_type_id": walker_blueprint.id,
+        "traffic_manager_port": traffic_manager_port,
+        "traffic_manager_synchronous": True,
+        "traffic_manager_seed": 1729,
+        "walker_origin": _location_xyz(origin),
+        "walker_destination": _location_xyz(destination),
+    }
+    return vehicle, walker, traffic_manager
+
+
 def run_gate(*, mode, run_dir, provenance, host="127.0.0.1", port=2000, ticks=100,
              timeout=10.0, allow_world_mutation=False, api=None):
-    """Injected APIs are test-only and always use separate harness-test scopes."""
-    _require(mode in STAGES, "mode must be rpc or sensors")
+    """Validate rpc, sensors, or actors against an exclusive endpoint world.
+
+    Injected APIs are test-only and always use separate harness-test scopes.
+    """
+    _require(mode in STAGES, "mode must be rpc, sensors or actors")
     run_dir, provenance = Path(run_dir).resolve(), Path(provenance).resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
     output = run_dir / "stage-report.json"
@@ -297,10 +431,13 @@ def run_gate(*, mode, run_dir, provenance, host="127.0.0.1", port=2000, ticks=10
     required = ["environment", "provenance", "permission", "handshake", "world", "sync-settings", "ticks"]
     if mode == "sensors":
         required += ["sensor-setup", "alignment", "camera", "lidar"]
+    if mode == "actors":
+        required += ["actor-setup", "vehicle-motion", "walker-motion"]
     required += ["cleanup"]
     checks = {name: "MISSING" for name in required}
-    sources, owned, streams = {}, [], {}
+    sources, owned, streams, controllers = {}, [], {}, []
     world = original = None
+    traffic_manager = vehicle = walker = None
     settings_attempted = False
     provenance_snapshot = work / "provenance.json"
     provenance_sha256 = None
@@ -324,7 +461,7 @@ def run_gate(*, mode, run_dir, provenance, host="127.0.0.1", port=2000, ticks=10
         _require(isinstance(host, str) and bool(host.strip()), "host must be nonempty")
         _require(type(port) is int and 1 <= port <= 65535, "port must be in 1..65535")
         _require(type(ticks) is int and (2 if mode == "sensors" else 1) <= ticks <= 10000,
-                 "ticks must be in 1..10000 (sensors needs at least 2)")
+                 "ticks must be in 1..10000 (sensors/actors need at least 2)")
         _require(type(timeout) in (int, float) and 0 < timeout <= 120, "timeout must be in (0, 120]")
         raw["environment"] = ({"injected": True, "native_validation": False}
                               if injected else runtime_environment())
@@ -372,8 +509,7 @@ def run_gate(*, mode, run_dir, provenance, host="127.0.0.1", port=2000, ticks=10
                      "existing physics substeps cannot accommodate 0.05 seconds")
         desired.synchronous_mode = True
         desired.fixed_delta_seconds = STEP_SECONDS
-        if mode == "sensors":
-            desired.no_rendering_mode = False
+        desired.no_rendering_mode = mode != "sensors"
         settings_attempted = True
         world.apply_settings(desired, timeout)
         _require(world.get_settings() == desired, "synchronous world settings were not applied")
@@ -383,12 +519,24 @@ def run_gate(*, mode, run_dir, provenance, host="127.0.0.1", port=2000, ticks=10
             active = "sensor-setup"
             base = _spawn_sensors(api, world, owned, streams, raw)
             checks[active] = "PASS"
+        if mode == "actors":
+            active = "actor-setup"
+            vehicle, walker, traffic_manager = _spawn_actors(api, client, world, owned, raw)
+            controllers.append(owned[-1])
+            checks[active] = "PASS"
         previous = validate_snapshot(world.get_snapshot())
         raw["tick_baseline"] = previous
-        warmup = WARMUP_TICKS if mode == "sensors" else 0
+        warmup = WARMUP_TICKS if mode == "sensors" else ACTOR_WARMUP_TICKS if mode == "actors" else 0
         rgb_hashes = set()
+        vehicle_start = walker_start = None
+        vehicle_max_speed = walker_max_speed = 0.0
         for index in range(warmup + ticks):
             active = "ticks"
+            if index and index % 100 == 0:
+                print(f"tick progress mode={mode} index={index}/{warmup + ticks} "
+                      f"frame={previous['frame']}", flush=True)
+            for stream in streams.values():
+                stream.check_failure()
             if mode == "sensors" and index >= warmup:
                 yaw = 30.0 * math.sin((index - warmup + 1) / 10.0)
                 owned[0].set_transform(_pose(api, base, yaw, -15.0))
@@ -401,6 +549,23 @@ def run_gate(*, mode, run_dir, provenance, host="127.0.0.1", port=2000, ticks=10
                 continue
             raw["ticks"].append(current)
             if mode == "rpc":
+                continue
+            if mode == "actors":
+                vehicle_location = vehicle.get_location()
+                walker_location = walker.get_location()
+                vehicle_speed = _velocity_meters_per_second(vehicle.get_velocity())
+                walker_speed = _velocity_meters_per_second(walker.get_velocity())
+                if vehicle_start is None:
+                    vehicle_start, walker_start = vehicle_location, walker_location
+                vehicle_max_speed = max(vehicle_max_speed, vehicle_speed)
+                walker_max_speed = max(walker_max_speed, walker_speed)
+                raw.setdefault("actor_samples", []).append({
+                    "frame": frame,
+                    "vehicle_location": _location_xyz(vehicle_location),
+                    "vehicle_speed": vehicle_speed,
+                    "walker_location": _location_xyz(walker_location),
+                    "walker_speed": walker_speed,
+                })
                 continue
             active = "alignment"
             camera = streams["camera"].frame(frame, timeout)
@@ -422,6 +587,28 @@ def run_gate(*, mode, run_dir, provenance, host="127.0.0.1", port=2000, ticks=10
             raw["samples"].append({"frame": frame, "timestamp": current["elapsed_seconds"],
                                    "camera": camera_metrics, "lidar": lidar_metrics})
         checks["ticks"] = "PASS"
+        if mode == "actors":
+            vehicle_travelled = _travelled_meters(vehicle_start, vehicle.get_location())
+            walker_travelled = _travelled_meters(walker_start, walker.get_location())
+            raw["actors"].update({
+                "vehicle_travelled_meters": vehicle_travelled,
+                "vehicle_max_speed_mps": vehicle_max_speed,
+                "walker_travelled_meters": walker_travelled,
+                "walker_max_speed_mps": walker_max_speed,
+                "minimum_required_travel_meters": MIN_TRAVELLED_METERS,
+            })
+            active = "vehicle-motion"
+            _require(vehicle_travelled >= MIN_TRAVELLED_METERS,
+                     "Traffic Manager vehicle did not move")
+            _require(vehicle_max_speed > 0.0, "Traffic Manager vehicle velocity remained zero")
+            checks[active] = "PASS"
+            active = "walker-motion"
+            _require(walker_travelled >= MIN_TRAVELLED_METERS,
+                     "AI walker did not move")
+            # CARLA's official walker smoke test treats displacement as the
+            # motion signal; walker velocity reporting can remain zero on cooked
+            # builds even while navigation moves the actor.
+            checks[active] = "PASS"
         if mode == "sensors":
             active = "alignment"
             _require(not any(stream.overflow.is_set() for stream in streams.values()), "sensor queue overflow")
@@ -435,11 +622,26 @@ def run_gate(*, mode, run_dir, provenance, host="127.0.0.1", port=2000, ticks=10
         raw["errors"].append(f"{active}: {type(error).__name__}: {error}")
     finally:
         cleanup_errors = []
+        for controller in controllers:
+            try:
+                controller.stop()
+            except Exception as error:
+                cleanup_errors.append(f"stop controller {controller.id}: {error}")
+        if traffic_manager is not None:
+            try:
+                traffic_manager.set_synchronous_mode(False)
+            except Exception as error:
+                cleanup_errors.append(f"stop Traffic Manager synchronous mode: {error}")
+        if vehicle is not None:
+            try:
+                vehicle.set_autopilot(False, traffic_manager.get_port())
+            except Exception as error:
+                cleanup_errors.append(f"disable vehicle autopilot: {error}")
         for stream in streams.values():
             stream.closed.set()
         for actor in reversed(owned):
             try:
-                if actor.is_listening:
+                if getattr(actor, "is_listening", False):
                     actor.stop()
             except Exception as error:
                 cleanup_errors.append(f"stop actor {actor.id}: {error}")

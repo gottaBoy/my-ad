@@ -1,8 +1,10 @@
 """Harness-only tests: all CARLA clients, worlds and sensor data below are fakes."""
 
 import copy
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import struct
@@ -40,6 +42,54 @@ class FakeBlueprint:
 
     def set_attribute(self, name, value):
         self.attributes[name] = value
+
+
+class FakeActor:
+    def __init__(self, world, blueprint, actor_id):
+        self.world, self.blueprint, self.id = world, blueprint, actor_id
+        self.destroyed = False
+        self.location = NS(x=0.0, y=0.0, z=0.0)
+        self.velocity = NS(x=0.0, y=0.0, z=0.0)
+
+    def get_location(self):
+        return self.location
+
+    def get_velocity(self):
+        return self.velocity
+
+    def destroy(self):
+        self.destroyed = True
+        return True
+
+
+class FakeVehicle(FakeActor):
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.autopilot = []
+
+    def set_autopilot(self, enabled, tm_port=None):
+        self.autopilot.append((enabled, tm_port))
+
+
+class FakeWalkerController(FakeActor):
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.started = False
+        self.stopped = False
+        self.destination = None
+        self.max_speed = None
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.stopped = True
+
+    def go_to_location(self, destination):
+        self.destination = destination
+
+    def set_max_speed(self, speed):
+        self.max_speed = speed
 
 
 class FakeSensor:
@@ -96,9 +146,11 @@ class FakeWorld:
             tile_stream_distance=3000.0, actor_active_distance=2000.0, spectator_as_ego=True)
         self.original = copy.deepcopy(self.settings)
         self.applied, self.sensors = [], []
+        self.actors = []
         self.existing = NS(id=17, destroy=mock.Mock(), set_transform=mock.Mock())
         self.spawn_points = [NS(location=NS(x=1, y=2, z=3), rotation=NS(yaw=10))]
         self.spawn_error = False
+        self.actor_spawn_error = False
         self.listen_error = False
         self.restore_error = False
         self.apply_error = False
@@ -106,6 +158,7 @@ class FakeWorld:
         self.packet_hook = None
         self.tick_hook = None
         self.tick_calls = 0
+        self.navigation_calls = 0
 
     def get_map(self):
         return NS(name="HarnessOnlyMap", get_spawn_points=lambda: self.spawn_points)
@@ -126,9 +179,30 @@ class FakeWorld:
             raise RuntimeError("fake partial settings failure")
 
     def get_blueprint_library(self):
-        return NS(find=FakeBlueprint)
+        self.blueprints = [
+            FakeBlueprint("vehicle.tesla.model3"),
+            FakeBlueprint("walker.pedestrian.0001"),
+        ]
+        return NS(find=FakeBlueprint, filter=self._filter_blueprints)
 
-    def spawn_actor(self, blueprint, transform):
+    def _filter_blueprints(self, pattern):
+        if pattern == "vehicle.*":
+            return [self.blueprints[0]]
+        if pattern == "walker.pedestrian.*":
+            return [self.blueprints[1]]
+        return []
+
+    def spawn_actor(self, blueprint, transform, attach_to=None):
+        if blueprint.id.startswith(("vehicle.", "walker.pedestrian.", "controller.ai.")):
+            if self.actor_spawn_error:
+                raise RuntimeError("fake actor spawn failure")
+            actor_id = 2000 + len(self.actors)
+            actor_class = (FakeWalkerController if blueprint.id == "controller.ai.walker"
+                           else FakeVehicle if blueprint.id.startswith("vehicle.")
+                           else FakeActor)
+            actor = actor_class(self, blueprint, actor_id)
+            self.actors.append(actor)
+            return actor
         if self.spawn_error and self.sensors:
             raise RuntimeError("fake second spawn failure")
         actor = FakeSensor(self, blueprint, 1000 + len(self.sensors))
@@ -145,6 +219,13 @@ class FakeWorld:
             actor.emit()
         return self.frame
 
+    def get_random_location_from_navigation(self):
+        self.navigation_calls += 1
+        if self.navigation_calls == 1:
+            return NS(x=1.0, y=2.0, z=3.0)
+        return NS(x=21.0, y=2.0, z=3.0)
+        return NS(x=1.0, y=2.0, z=3.0)
+
 
 class FakeCarla:
     def __init__(self):
@@ -156,6 +237,11 @@ class FakeCarla:
             get_client_version=lambda: self.client_version,
             get_server_version=lambda: self.server_version,
             get_world=lambda: self.world)
+        self.traffic_manager = NS(
+            get_port=mock.Mock(return_value=8000),
+            set_synchronous_mode=mock.Mock(),
+            set_random_device_seed=mock.Mock())
+        self.client.get_trafficmanager = mock.Mock(return_value=self.traffic_manager)
 
     def Client(self, host, port):
         self.created_clients.append((host, port))
@@ -214,11 +300,20 @@ class PureGateTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "future"):
             stream.frame(3, 0.01)
         full = gate.AlignedQueue()
-        for frame in range(gate.QUEUE_SIZE + 1):
+        for frame in range(gate.QUEUE_SIZE):
             full(NS(frame=frame))
         self.assertEqual(gate.QUEUE_SIZE, full.queue.qsize())
+        full(NS(frame=gate.QUEUE_SIZE))
+        self.assertTrue(full.overflow.is_set())
         with self.assertRaisesRegex(ValueError, "overflow"):
             full.frame(0, 0.01)
+
+    def test_queue_overflow_failures_are_sticky(self):
+        stream = gate.AlignedQueue()
+        stream.overflow.set()
+        stream.failure = ValueError("sensor queue overflow while receiving frame 32")
+        with self.assertRaisesRegex(ValueError, "overflow"):
+            stream.frame(0, 0.01)
 
 
 class RuntimeGateHarnessTest(unittest.TestCase):
@@ -254,6 +349,7 @@ class RuntimeGateHarnessTest(unittest.TestCase):
         self.api.world.existing.destroy.assert_not_called()
         self.api.world.existing.set_transform.assert_not_called()
         self.assertTrue(all(sensor.destroyed for sensor in self.api.world.sensors))
+        self.assertTrue(all(actor.destroyed for actor in self.api.world.actors))
 
     def test_rpc_fake_pass_is_test_only_and_restores_settings(self):
         report = self.run_gate()
@@ -267,12 +363,23 @@ class RuntimeGateHarnessTest(unittest.TestCase):
         self.assertEqual(3, len(self.raw["ticks"]))
         self.assertEqual(3, self.api.world.tick_calls)
         self.assertEqual([], self.api.world.sensors)
+        self.assertTrue(self.raw["original_settings"]["no_rendering_mode"])
+        self.assertTrue(self.raw["applied_settings"]["no_rendering_mode"])
+        self.assertTrue(self.raw["restored_settings"]["no_rendering_mode"])
         self.assert_restored()
         gate.stage_report.validate_report(self.run_dir / "stage-report.json",
                                          stage_id=report["stage_id"], scope=report["scope"])
         with self.assertRaises(gate.stage_report.ReportError):
             gate.stage_report.validate_report(self.run_dir / "stage-report.json",
-                                             stage_id=gate.STAGES["rpc"][0], scope=gate.STAGES["rpc"][1])
+                                              stage_id=gate.STAGES["rpc"][0], scope=gate.STAGES["rpc"][1])
+
+    def test_tick_progress_is_logged_for_long_soaks(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            report = self.run_gate(ticks=201)
+        self.assertEqual("PASS", report["status"])
+        self.assertIn("tick progress mode=rpc index=100/201 frame=", output.getvalue())
+        self.assertIn("tick progress mode=rpc index=200/201 frame=", output.getvalue())
 
     def test_sensors_align_realistic_fake_payloads_and_write_raw_evidence(self):
         report = self.run_gate("sensors")
@@ -282,6 +389,7 @@ class RuntimeGateHarnessTest(unittest.TestCase):
         self.assertEqual(3, len(self.raw["samples"]))
         self.assertEqual(gate.WARMUP_TICKS + 3, self.api.world.tick_calls)
         self.assertGreater(self.raw["distinct_rgb_frames"], 1)
+        self.assertTrue(self.raw["original_settings"]["no_rendering_mode"])
         self.assertFalse(self.raw["applied_settings"]["no_rendering_mode"])
         self.assertTrue(self.raw["restored_settings"]["no_rendering_mode"])
         for name in ("camera-raw", "lidar-raw"):
@@ -290,6 +398,45 @@ class RuntimeGateHarnessTest(unittest.TestCase):
         self.assertEqual(gate.WIDTH * gate.HEIGHT * 4,
                          (self.run_dir / report["evidence"]["camera-raw"]["path"]).stat().st_size)
         self.assertTrue(all(len(sensor.transforms) == 3 for sensor in self.api.world.sensors))
+        self.assert_restored()
+
+    def test_actors_validate_tm_and_walker_motion_and_cleanup(self):
+        def move_actors(world):
+            for actor in world.actors:
+                if actor.blueprint.id.startswith("vehicle."):
+                    actor.location = NS(x=actor.location.x + 0.05, y=0.0, z=0.0)
+                    actor.velocity = NS(x=1.0, y=0.0, z=0.0)
+                elif actor.blueprint.id.startswith("walker.pedestrian."):
+                    actor.location = NS(x=actor.location.x + 0.02, y=0.0, z=0.0)
+                    # Cooked builds can report zero walker velocity while the
+                    # actor follows its navigation route; displacement is the
+                    # walker-motion contract, matching CARLA's smoke test.
+                    actor.velocity = NS(x=0.0, y=0.0, z=0.0)
+        self.api.world.tick_hook = move_actors
+        report = self.run_gate("actors", ticks=10)
+        self.assertEqual("PASS", report["status"])
+        self.assertEqual("harness-test.carla-runtime-actors", report["stage_id"])
+        self.assertEqual(10, len(self.raw["ticks"]))
+        self.assertEqual(10, len(self.raw["actor_samples"]))
+        self.assertEqual(13, self.api.world.tick_calls)
+        self.assertTrue(self.raw["original_settings"]["no_rendering_mode"])
+        self.assertTrue(self.raw["applied_settings"]["no_rendering_mode"])
+        self.assertTrue(self.raw["restored_settings"]["no_rendering_mode"])
+        self.assertGreaterEqual(self.raw["actors"]["vehicle_travelled_meters"], 0.1)
+        self.assertGreaterEqual(self.raw["actors"]["walker_travelled_meters"], 0.1)
+        vehicle = next(actor for actor in self.api.world.actors
+                       if actor.blueprint.id.startswith("vehicle."))
+        walker = next(actor for actor in self.api.world.actors
+                      if actor.blueprint.id.startswith("walker.pedestrian."))
+        controller = next(actor for actor in self.api.world.actors
+                          if actor.blueprint.id == "controller.ai.walker")
+        self.assertEqual([(True, 8000), (False, 8000)], vehicle.autopilot)
+        self.assertTrue(controller.started)
+        self.assertTrue(controller.stopped)
+        self.assertEqual(1.4, controller.max_speed)
+        self.api.traffic_manager.set_synchronous_mode.assert_has_calls(
+            [mock.call(True), mock.call(False)])
+        self.api.traffic_manager.set_random_device_seed.assert_called_once_with(1729)
         self.assert_restored()
 
     def test_permission_is_required_before_connecting_or_modifying_world(self):

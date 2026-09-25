@@ -1246,3 +1246,545 @@ nano-ros 进入主链路             暂不需要
 
 在 G4 和 G5 通过前，不把结果描述为“DGX Spark 已支持 CARLA”；在 G8 之前，
 不把 CARLA Server 启动描述为“Autoware 闭环”。
+
+### 9.23 2026-09-21 Editor cook 路线当前状态
+
+新增 `fbx-skip` Editor 依赖图 profile：`make carla-editor-check EDITOR_PROFILE=fbx-skip` 会导出 `CARLA_ARM64_FBX_SKIP=1`，UE 的 `FBX.Build.cs` 仅保留 include/宏，不链接缺失的 Autodesk ARM64 FBX SDK。最新运行 `artifacts/carla/editor-check-20260921T021823Z-HCukFT/` 退出码 0，UBT 依赖图通过；同时记录大量 x64 命名的 Boost/VHACD/libxml2/SpeedTree 库路径告警，说明后续真实链接仍需逐一验证，不能把该 PASS 理解为 Editor 构建或 Cook 通过。
+
+同轮新增 `make carla-editor-deps`，用于在 ARM64 build 容器重建 Editor 依赖中的 Vorbis、VHACD 和 libPNG PIC 归档；该阶段只验证静态归档架构和 whole-archive PIC link，不包含 Editor/Cook/runtime。下一步是执行该依赖重建，然后移除 `-SkipBuild` 推进真实 `CarlaUnrealEditor` 编译。
+
+### 9.24 2026-09-22 ARM64 `fbx-skip` Editor 构建打通
+
+`make carla-editor-deps JOBS=8` 已通过，Vorbis、VHACD、libPNG、FontConfig、
+Boost、Python、USD 等依赖重建阶段完成。真实 Editor 构建推进过程中，
+`SparseVolumeTexture` 曾因旧版 TBB 静态归档缺少 `tbb::task` RTTI ABI 符号
+`_ZTIN3tbb4taskE` 而链接失败；新增
+`artifacts/carla/usd/tbb-rtti-arm64/libtbb-rtti.a` 并在
+`IntelTBB.Build.cs` 中追加到 ARM64 TBB 归档之后。复验中
+`llvm-nm` 确认 helper 提供 `_ZTIN3tbb4taskE` / `_ZTSN3tbb4taskE`，且依赖
+`__cxxabiv1::__class_type_info` vtable；后续 `SparseVolumeTexture` 已成功链接。
+
+剩余首层失败是 `SequencerScriptingEditor` 同时缺 `MovieSceneTools` 与 FBX SDK
+符号。该模块由默认引擎插件链强制拉入，逐个 `DisablePlugins` 会被显式依赖
+覆盖。最终在 `CarlaUnreal.uproject` 设置
+`DisableEnginePluginsByDefault=true`，保留项目显式插件，裁掉默认启用引擎
+插件链；`SequencerScripting`、`ControlRigEditor`、`LevelSequenceEditor`、
+`TemplateSequenceEditor` 均退出构建图。清理实验性 `.uplugin` 修改后复验，
+`make carla-editor-build EDITOR_PROFILE=fbx-skip EDITOR_BUILD_TIMEOUT=14400`
+该结论需要修正：05:26 artifact 对应切换到真正 `LinuxArm64` 平台前的
+`Linux Development -architecture=arm64` 增量产物，不能作为 LinuxArm64
+native Editor build 证据。
+
+2026-09-22 晚间继续审计真实 `LinuxArm64` 构建时，发现平台命名约定不同：
+`LinuxArm64` 的模块产物为 `UnrealEditor-Core.so`，而普通 `Linux` 产物为
+`libUnrealEditor-Core.so`。UBT 的 `LinuxToolChain` 原先只有在依赖库已经落盘
+时才为无 `lib` 前缀的 `.so` 生成 `-l:UnrealEditor-Core.so`；同一次构建中
+尚未生成的依赖被错误归一成 `-lUnrealEditor-Core`，导致批量链接失败。现已
+改为按完整路径依赖的文件名生成精确 `-l:名称`，并在构建脚本中显式传
+`-buildubt`，确保 UBT 源码修改进入实际执行的二进制。
+
+真实 `LinuxArm64` 构建还修复了三个平台判断缺口：`SparseVolumeTexture` 的
+OpenVDB 依赖、`SwarmInterface` 的 MessagingCommon include 依赖、以及 metis
+的 ARM64 归档路径。最终 `make carla-editor-build EDITOR_PROFILE=fbx-skip
+EDITOR_BUILD_TIMEOUT=14400` 通过，最新证据为
+`artifacts/carla/editor-check-20260922T115230Z-lUFDVn/`，退出码 0。生成物包括
+ARM64 `UnrealEditor`、项目 `UnrealEditor-CarlaUnreal.so`、`NaniteBuilder` 等
+Editor 模块。
+
+该结论仍限定为 `fbx-skip` Editor native link：FBX 导入/导出插件被裁剪，
+未执行 Cook、资产转换、RPC、Vulkan 渲染或传感器验证；G4/G5 不能因此
+标记为通过。下一步是启动 Editor 并执行最小 cook probe。
+
+### 9.25 2026-09-22 ARM64 Editor startup gate 通过
+
+真实 `LinuxArm64` Editor 首次启动探针已通过。关键修复是使用正确的
+`LinuxArm64` target-platform 模块、清理新旧两种 SONAME 布局混链的插件产物，
+并在无渲染/声音的 headless 环境下使用 Editor 专用 `QUIT_EDITOR` 命令。
+此前 `-ExecCmds=quit` 只会输出 `Cmd: quit`，但在没有 viewport 的 Editor 中
+不会设置 `IsEngineExitRequested()`；gdb 采样确认主线程仍停留在
+`FEngineLoop::Tick -> UEngine::UpdateTimeAndHandleMaxTickRate` 的正常节流
+sleep，而不是 DDC/HTTP shutdown 阻塞。
+
+`-NoAssetRegistryCacheWrite` 已验证有效：不再写约 474 MiB 的
+`CachedAssetRegistry`，也避免了旧 180 秒运行中的 cache 写入和 DDC maintenance
+长尾。`-ddc=NoZenLocalFallback` 保持本地 DDC 可写。禁用默认地图仍使用：
+`-ini:EditorPerProjectUserSettings:[/Script/UnrealEd.EditorLoadingSavingSettings]:LoadLevelAtStartup=None`。
+SourceControl 配置覆盖已改为正确的 `Editor` ini：
+`-ini:Editor:[/Script/SourceControl.SourceControlPreferences]:bEnableUncontrolledChangelists=False`。
+
+最新证据：`artifacts/carla/editor-quit-editor-20260922T125242Z.log`，exit 0。
+日志包含 `Engine is initialized. Leaving FEngineLoop::Init()`、
+`Cmd: QUIT_EDITOR`、`Engine exit requested (reason: UUnrealEdEngine::CloseEditor())`；
+不包含 `MAP LOAD`、`LoadDefaultMapAtStartup`、`SIGSEGV`、`Fatal error!`。
+TargetPlatformManager 已加载 `LinuxArm64`、`LinuxArm64Server`、
+`LinuxArm64Client` 和 Vulkan shader format 模块。
+
+新增 `make carla-editor-startup` 固化该 gate。该 gate 只证明：native Editor
+初始化、插件加载、ARM64 target platforms 加载、本地 DDC 可用、无默认地图、
+干净退出。它不证明 Cook、Vulkan 渲染、RPC、传感器或完整 CARLA ARM64 支持。
+下一步是最小 cook probe。
+
+### 9.26 2026-09-22 ARM64 最小 Cook gate 通过
+
+新增 `make carla-editor-cook`。该 gate 在 native ARM64 `carla-build` 容器中，
+使用已通过启动验证的 `LinuxArm64` Editor，以 `-run=Cook`、
+`-targetplatform=LinuxArm64Server`、`-cooksinglepackagenorefs` 精确 cook
+`/Game/Carla/RT_LuminanceCapture`。该模式在 UE 5.5 源码中会设置
+`NoDefaultMaps`、`NoAlwaysCookMaps`、跳过硬/软引用，避免全量 Town/map
+依赖链；输出被限制在独立 artifact 目录并禁用 Zen store。
+
+最新证据：`artifacts/carla/editor-cook-20260922T130042Z-hho5PJ/`，exit 0。
+日志包含 `Packages Cooked: 1, Packages Iteratively Skipped: 0, Packages
+Skipped by Platform: 0, Total Packages: 1`、`TargetPlatforms=LinuxArm64Server`、
+`LogCook: Display: Done!` 和 `Success - 0 error(s)`。实际产物包括
+`cooked/CarlaUnreal/Content/Carla/RT_LuminanceCapture.uasset/.uexp`、
+`AssetRegistry.bin`、cook metadata 和 package store manifest。
+
+该 gate 只证明 `fbx-skip` Editor 能为 `LinuxArm64Server` cook 一个显式请求
+的项目资产并生成 cooked package。它不证明全量项目 Cook、map Cook、
+Vulkan 渲染、RPC、传感器或完整 CARLA runtime。下一步应先扩大到最小 map
+Cook，再尝试用 cooked package 启动 ARM64 `CarlaUnreal` Server。
+
+### 9.27 2026-09-23 ARM64 cooked dedicated server 最小 gate 通过
+
+真实 `LinuxArm64` `CarlaUnrealServer` 已在 cooked `OpenDriveMap` 包上完成
+30 秒稳定性探针。测试包包含 `Binaries/LinuxArm64/CarlaUnrealServer`、
+`OpenDriveMap` cooked map、cooked `CarlaGameMode`、premade
+`AssetRegistry.bin` 和项目/插件 descriptor。最终日志为
+`.codex-tmp/cooked-server-test2/CarlaUnreal/Saved/Logs/carla-server-probe-final.log`：
+server 被 `timeout` 按预期终止（exit 124），期间加载 premade registry，
+`Game class is 'CarlaGameMode_C'`，`OpenDriveMap` 进入 play，并监听
+`0.0.0.0:7777`；无 `SIGSEGV`、`Fatal error!`、`Unhandled Exception` 或
+module-load failure。
+
+调试中发现两个关键问题。第一，单包 cook 输出的 `AssetRegistry.bin` 只有
+1.5KB，直接覆盖测试包 root registry 会让 `CarlaGameMode` 不可见；恢复
+完整 195KB premade registry 后 GameMode 才能加载。第二，项目设置
+`DisableEnginePluginsByDefault=true` 时，虽然 `OnlineSubsystem` 代码已静态
+链接进 server，但插件未被加载，GameMode 启动阶段触发
+`Tried to get module interface for unloaded module: 'OnlineSubsystem'`。现已在
+项目 descriptor 显式启用 `OnlineSubsystem`。
+
+`AnimationData` 和 `ControlRig` 是 `CarlaGameMode` Editor/Cook 依赖，但旧
+server 二进制没有对应 runtime module；在 staged descriptor 中启用它们会导致
+`Plugin 'ControlRig' failed to load because module 'ControlRig' could not be
+found`。现已在项目 descriptor 用 `TargetAllowList=["Editor"]` 限定两者，并在
+`CarlaUnrealServer.Target.cs` 中显式 `DisablePlugins`，避免 dedicated server
+拉入 Editor-only 动画插件。
+
+新增 `scripts/carla/probe-arm64-cooked-server.sh` 与
+`make carla-cooked-server`。该 gate 要求 server 稳定运行到 probe timeout，并
+校验 registry、`CarlaGameMode_C`、map play、GameNetDriver/7777 监听标记，
+拒绝 crash、assertion、module-load failure 和 GameMode 缺失。当前日志仍报告
+5 个软引用资产缺失（Walker/Vehicle/Spectator/BlueprintFactory/Weather），因为
+测试包不是完整项目 cook；这些缺失被记录为 gate 边界，不视为本最小
+dedicated-server 启动 gate 的失败条件。该 gate 不证明 Vulkan 渲染、CARLA
+client RPC、传感器、traffic/walker gameplay 或完整 cooked 项目内容。
+
+### 9.28 2026-09-23 ARM64 full Cook/stage 与真实 client RPC 通过
+
+进一步完成了 `LinuxArm64Server` full project Cook。CookCommandlet 处理
+`44,370` 个包，其中 `44,262` 个实际 cooked，输出约 14GB；full Cook 收尾
+仍有 539 个来自 CarlaTools/编辑器资产的错误，因此没有把 Cook 标为无条件
+PASS。`CarlaTools`、`RenderDocPlugin`、`PerformanceMonitor`、
+`EditorScriptingUtilities`、`Volumetrics` 和动画编辑插件已限制为 Editor
+target，避免 dedicated server 装载编辑器链。
+
+新增 `scripts/carla/stage-arm64-cooked-server.sh` 与
+`make carla-stage-cooked-server`，将 full Cook 输出补齐为可运行 stage：
+ARM64 Game/Server binary、项目 descriptor、Engine ICU/Config、
+Nanite `TessellationTable.bin`、Online/ProceduralMesh/ChaosVehicles/
+EnhancedInput runtime plugin descriptors、CARLA shader、OpenDRIVE 和
+全部 CARLA Config JSON。
+
+在实际 staged `Town01_Opt` 上运行 ARM64 `CarlaUnrealServer` 与同版本
+`carla-0.10.0-cp310-cp310-linux_aarch64.whl`，RPC gate 通过：
+handshake、client/server version policy、world、同步设置、20 个固定 tick、
+cleanup 全部 PASS。证据目录为
+`/artifacts/carla/cooked-runtime-rpc-20260923T064824Z/endpoint`。
+
+### 9.29 2026-09-23 传感器/Vulkan 当前边界
+
+NullRHI 下 RGB camera 曾在 CARLA `ImageUtil::ReadImageDataBegin` 因空
+RenderTarget resource 触发 SIGSEGV；已补 resource 空值保护，并在
+`SceneCaptureSensor::BeginPlay` 强制 `UpdateResourceImmediate(true)`，
+server 增量重建通过。之后 NullRHI sensors 不再崩溃，但没有 camera frame。
+
+进一步使用 GB10/NVIDIA Vulkan 运行 Game target。GPU/RHI 初始化成功，但
+Game cooked 启动在缺少 `Engine/GlobalShaderCache-VULKAN_SM6.bin` 处退出；
+该文件未由本次 `-nullrhi` full Cook 生成。随后补建 ARM64
+ShaderCompileWorker、LinuxArm64 worker libraries 和 module manifest，并在
+GPU 容器使用 `-AllowCommandletRendering -RenderOffScreen` 尝试生成 shader
+cache：
+
+- `SF_VULKAN_SM6`：ARM64 `SPIRV-Reflect` 在 shader compile 中触发 assertion；
+- `SF_VULKAN_SM5`：UE `TextureBuildUtilities::GetOutputPixelFormatWithFallback`
+  先暴露 LinuxArm64 缺少 DXT/Oodle texture format module，补充
+  uncompressed texture fallback 和缺失 device-profile fallback 后，进一步
+  触发 NVIDIA `libnvidia-glvkspirv.so.580.173.02` SIGSEGV；
+- 两次均没有生成可用 `GlobalShaderCache-*.bin`。
+
+为支持 shader cook，SCW 已补齐到 `Engine/Binaries/LinuxArm64`，包括 worker
+动态库和 module manifest；SCW 本身可以启动并持续编译。当前剩余阻塞是
+ARM64/Vulkan shader compiler 路径：SM6 的 SPIRV-Reflect assertion，以及
+SM5 的 NVIDIA Vulkan compiler crash，二者都发生在 UE global shader cook
+阶段，尚未进入 CARLA camera readback。
+
+因此真实 RGB/LiDAR sensor gate 仍为 `NOT-RUN/BLOCKED`，不能标记 PASS。
+NullRHI sensor gate 已补 resource 空值保护并不再 SIGSEGV，但没有 frame；
+真实 NVIDIA Vulkan sensor gate 已确认 GPU/RHI 可初始化，但在 shader cache
+之前退出。当前证据证明 native Vulkan readback gate PASS、真实 server RPC
+PASS，UE Vulkan shader-cooked camera/LiDAR 仍需要修复 ARM64 shader cook
+链后才能验收。运行期通过 `Town01_Opt` 的 RPC 证据不等于 sensor PASS。
+### 9.30 2026-09-23 LiDAR 与 vehicle/walker runtime smoke
+
+在同一 staged `Town01_Opt` ARM64 dedicated server 上，单独绕开 RGB
+camera 运行 LiDAR/actor smoke。8 个同步帧全部连续且 payload 非空
+（约 222--225KB/frame），frame/timestamp 正常；同时成功 spawn vehicle
+和 walker，并完成 3 个同步 tick 与 cleanup。证据：
+`/artifacts/carla/cooked-runtime-lidar-20260923T120643Z/report.json`。
+
+因此当前 runtime 状态细分为：CARLA RPC **PASS**、LiDAR endpoint smoke
+**PASS**、vehicle/walker spawn/tick smoke **PASS**；RGB camera 与 UE
+Vulkan shader-cooked rendering 仍 **BLOCKED**。这不能替代完整 Traffic
+Manager、walker controller、RGB camera frame 和 ROS/Autoware 验收。
+
+### 9.31 2026-09-23 NVIDIA Vulkan shader/PSO 根因收敛
+
+在可写的 ARM64 GPU 容器中重新执行渲染 Cook，并使用
+`-DDC-ForceMemoryCache` 排除 DDC/只读挂载干扰。同时将
+`r.DistanceFieldAO`、Lumen、反射、虚拟阴影、skin cache 和 mesh distance
+field 全部显式设为关闭。日志确认这些 CVar 均保持为 `0`，但
+`SF_VULKAN_SM6` 仍在首次 compute PSO 创建时于
+`libnvidia-eglcore.so.580.173.02` SIGSEGV：
+
+- `UnrealEditor-RHI.so!PipelineStateCache::GetAndOrCreateComputePipelineState`
+- `UnrealEditor-VulkanRHI.so`
+- `libnvidia-eglcore.so.580.173.02`
+
+随后使用 `-sm5` 强制 `VULKAN_SM5`。该路径越过了 SM6 bindless/RHI 选择，
+但在 shader module 编译时于同一 NVIDIA 驱动的
+`libnvidia-glvkspirv.so.580.173.02` SIGSEGV。两次均未生成可用
+`GlobalShaderCache-*.bin`，因此不是 CARLA 地图、RenderTarget 空指针或
+某个距离场特性导致的单点失败。
+
+额外尝试了指向 lavapipe 的软件 ICD。检查发现当前 ARM64 工具链镜像没有
+`/usr/share/vulkan/icd.d/lvp_icd.json`，独立 `vulkaninfo` 已先报 ICD 文件
+不存在；加入 `-SkipVulkanProfileCheck` 后，UE 自身 Vulkan loader/ICD
+检查仍报告 `Cannot find a compatible Vulkan driver (ICD)`。该路径没有
+产生可用于 GB10 验收的结果，也没有被计入 PASS。
+
+当前结论进一步收敛为：native Vulkan clear/readback、真实 CARLA RPC、
+LiDAR 和 actor smoke 已有证据；UE ARM64 camera 所需的 shader/PSO
+渲染链在 NVIDIA driver `580.173.02` 上仍 **BLOCKED**。在获得可用的
+NVIDIA ARM64 驱动修复/升级或兼容的 UE Vulkan shader workaround 前，
+不能声称 RGB camera、GlobalShaderCache 或完整 G5 通过。
+
+### 9.32 2026-09-23 UE 侧 workaround 复验
+
+为避免修改 NVIDIA 驱动，使用命令行临时覆盖验证两个 UE 侧方向：
+
+- 将 `[SF_VULKAN_SM6]` 的 `BindlessResources` 和 `BindlessSamplers`
+  临时改为 `Disabled`。该路径改变了失败位置，但最终仍在
+  `libnvidia-glvkspirv.so.580.173.02` SIGSEGV；
+- 将 `r.Vulkan.RHIThread=0`、`r.PSOPrecaching=0`、
+  `r.Vulkan.AllowPSOPrecaching=0` 和 `r.AsyncPipelineCompile=0` 临时设为
+  关闭。该路径仍在
+  `PipelineStateCache::GetAndOrCreateComputePipelineState` 进入
+  `libnvidia-eglcore.so.580.173.02` SIGSEGV。
+
+这些参数没有写入项目、UE 源码或驱动。结论是当前已验证的 UE 侧
+bindless、RHI thread、PSO precache 和异步 pipeline compile workaround
+均不足以绕过该驱动崩溃；RGB camera gate 继续保持 **BLOCKED**。
+
+### 9.33 2026-09-23 shader debug dump 边界
+
+使用独立 `-saveddirsuffix=shaderdiag`、`r.DumpShaderDebugInfo=1` 和
+`r.DumpShaderDebugWorkerCommandLine=1` 重新运行 SM5 Cook。独立目录只
+生成 DDC key、日志和 crash report，没有 `.spv` 或 `.spvasm` 文件；也就是
+当前失败不是 UE shader compiler 返回可捕获的编译错误，而是在 shader
+产物进入 NVIDIA Vulkan runtime/PSO 路径后由驱动 SIGSEGV。该诊断运行
+同样没有修改驱动或默认项目配置。
+
+### 9.34 2026-09-23 SM6 GPUScene workaround 严格复验
+
+此前尝试用命令行覆盖
+`-ini:Engine:[ShaderPlatform VULKAN_SM6]:bSupportsGPUScene=false`，但 cooked
+ini metadata 中没有出现该值，B797/GPUScene 相关 shader 仍被编译，说明
+该 DDPI shader capability 不能通过普通 Engine ini override 生效。
+
+随后只做了一次临时文件级验证：将
+`Engine/Config/VulkanPC/DataDrivenPlatformInfo.ini` 中
+`[ShaderPlatform VULKAN_SM6]` 的 `bSupportsGPUScene` 从 `true` 改为
+`false`，在带 GB10 GPU 的 ARM64 容器中重跑相同 `Town01_Opt` SM6 render
+Cook，测试退出后立即恢复为 `true`。当前 git diff 确认该 UE 配置文件已
+无修改；没有修改 NVIDIA 驱动，也没有把该 workaround 保留为默认方案。
+
+结果：GPU/Vulkan 初始化成功，B797 没有再出现，也没有进入
+`libnvidia-eglcore.so.580.173.02` 的 compute PSO SIGSEGV。这证明
+GPUScene 是 B797/PSO 崩溃链路的必要触发条件，且文件级 capability
+覆盖可以改变 shader permutation 集合。但进程随后在
+`SPIRV-Reflect/spirv_reflect.c:976` 触发
+`Assertion 'index_value != UINT32_MAX' failed`，SCW 和直接编译路径均
+SIGABRT；失败 shader 包括 volumetric fog、ray tracing occlusion、
+Lumen hardware ray tracing 和 MegaLights compute permutations。证据：
+`/artifacts/carla/render-sm6-config-no-gpuscene-gpu-20260923T143223Z/run.log`。
+
+因此当前阻塞被拆分为两层：GPUScene 关闭可以避开 B797 和 NVIDIA PSO
+崩溃，但 SM6 cook 仍被 UE ARM64 SPIRV-Reflect 解析断言阻断；未生成
+`GlobalShaderCache-VULKAN_SM6.bin`，RGB camera gate 继续
+**BLOCKED**。下一步应优先处理 SPIRV-Reflect 对这些 SM6 SPIR-V 模块的
+解析兼容性，而不是继续调整 NVIDIA runtime 参数。
+
+### 9.35 2026-09-24 Lavapipe client RGB/LiDAR sensor gate 通过
+
+为了绕开 NVIDIA driver `580.173.02` 的 ARM64 shader/PSO 崩溃且不修改
+驱动，改用独立 Lavapipe client 路径验证渲染。工具链镜像中的 Mesa
+23.2.1 行为不稳定；升级到 `carla-lavapipe-2404` 容器中的 Mesa/LLVM
+25.2.8/20.1.2 后，SM6 PSO 创建不再崩溃。该路径同时禁用 bindless
+resources/samplers、ray tracing、Lumen、Nanite 和 volumetric cloud，
+并使用已验证的 `OverrideGlobalShaderCache-VULKAN_SM6.bin`
+（SHA256 `414078ae10cb7ff91d6ffc8718c970bbe62430a32bb4924bbf1bb3e1d67399a3`）。
+
+第二次 `LinuxArm64Client` full Cook 位于
+`/artifacts/carla/client-full-cook-sm6-lavapipe/full-cook-20260923T181633Z-NwMhgV`，
+生成 94,539 个文件、约 51.5GB 产物和 `AssetRegistry.bin`，但没有把 Cook
+标记为 PASS：进程 exit 1，收尾仍有 592 个资产编译/加载错误和 41489 个
+警告，并以 abnormal shutdown 结束。该 Cook 只作为实验性 client staging
+基础。
+
+独立 client stage 位于
+`/artifacts/carla/cooked-client-full/CarlaUnreal`，约 51.3GB。staging
+脚本曾误删项目 cooked `Plugins/Carla/Content`，导致 32 个
+`/Carla/PostProcessingMaterials` sensor 材质缺失；修复后保留该目录。
+由于 `CarlaUnreal` 是单体静态链接，单独重建 `UnrealEditor-Renderer.so`
+不足以更新 BlueNoise 防护，随后完整重链 ARM64 client 并复制进 stage。
+
+重链后的 client 在 Lavapipe 上完成 180 秒 runtime smoke：Vulkan 设备为
+`llvmpipe (LLVM 20.1.2, 128 bits)`，API `1.4.318`，`Town01_Opt`
+episode 启动，到 frame 147，无 BlueNoise/Nanite/SIGSEGV/fatal。日志中
+仍有少量 material ShaderMap 和软引用资产缺失警告。
+
+正式 sensor gate 的关键差异是必须关闭 Virtual Shadow Maps。最初使用的
+`r.VirtualShadowMaps=0` 不是有效 CVar，被 UE 记录为 dummy variable；正确
+覆盖是 `r.Shadow.Virtual.Enable=0`。否则 Lavapipe 因 wave operations
+disabled 触发
+`GRHISupportsWaveOperations` assertion 并 SIGSEGV。Nanite 也必须通过
+`r.Nanite.ProjectEnabled=0` 和 `r.Nanite.ForceEnableMeshes=0` 关闭。
+
+最终正式 gate 在 `carla-lavapipe-2404` 的 client（RPC 2000）与
+`carla-build-session` 的 native ARM64 Python client 之间运行：
+
+- 证据：`/artifacts/carla/client-sensor-acceptance-20260924T0004Z/runtime-sensors-20260923T190240Z-fxPTlV`
+- endpoint 与 invocation 均 **PASS**，exit 0
+- 20/20 个 RGB frame 均为 320x240、307,200 字节，且内容非空间常量
+- 20/20 个 LiDAR frame 均非空，每帧约 1051--1062 点
+- frame 40--59 连续，RGB/LiDAR frame 与 timestamp 对齐
+- `ticks`、`alignment`、`camera`、`lidar`、`cleanup` 全部 PASS
+- client/server 版本均为 CARLA 0.10.0
+
+该 gate 已通过 `make carla-lavapipe-sensors` 固化。wrapper 从官方
+`ubuntu:24.04` 新建 Lavapipe 容器，安装 Mesa/LLVM，直接以可写 bind 挂载
+共享 artifacts，并在 build 容器内运行 Python probe。复验证据：
+`/artifacts/carla/runtime-sensors-20260924T031221Z-cYM3nR`，endpoint 与
+invocation 均 PASS，exit 0；gate 容器与 RPC 2000 均已清理。
+
+结论更新为：ARM64 cooked dedicated server RPC、LiDAR/actor smoke，以及
+**Lavapipe client RGB/LiDAR sensor gate** 均有真实证据。但 9.31--9.34
+中的 NVIDIA GB10 Vulkan shader/PSO 崩溃仍存在；Lavapipe 是软件渲染，
+不能代表 GB10 GPU 性能或驱动兼容性。full client Cook 仍有资产错误，
+Cook gate 本身不能标记 PASS。ROS/Autoware、Traffic Manager、walker
+controller 和长时间稳定性仍未验收。
+
+### 9.36 2026-09-24 Lavapipe Traffic Manager + AI walker gate 通过
+
+`check_carla_runtime.py` 的 `actors` 模式已扩展为可复现 endpoint gate：
+Traffic Manager 使用 synchronous mode 与固定 seed `1729`，注册 vehicle
+autopilot，创建 `controller.ai.walker`，设置至少 10m 外的导航目的地和
+最大速度 `1.4m/s`，并验证真实位移、速度观测和清理。清理顺序为停止
+controller、退出 TM synchronous mode、关闭 autopilot、逆序销毁 actor、
+恢复原 world settings。
+
+首次运行定位到 cooked client stage 缺少
+`Content/Carla/Maps/Nav/Town01_Opt.bin`，导致
+`get_random_location_from_navigation()` 无导航点。client/server stage
+脚本已改为携带 `Content/Carla/Maps/Nav/*.bin`；当前 client stage 已增量
+补齐，未覆盖 `/artifacts/carla/cooked-server-full`。随后按官方 walker
+smoke test 语义在 controller spawn 后、`start()` 前增加一次 tick，并检查
+`go_to_location()`、`set_max_speed()` 返回值。
+
+最终 gate 通过命令：
+
+```bash
+CARLA_RUNTIME_MODE=actors CARLA_RUNTIME_TICKS=120 \
+  make carla-lavapipe-sensors
+```
+
+证据：`/artifacts/carla/runtime-actors-20260924T034651Z-oQxpNx`，endpoint
+与 invocation 均 **PASS**，exit 0。`actor-setup`、`ticks`、
+`vehicle-motion`、`walker-motion`、`cleanup` 全部 PASS。Traffic Manager
+vehicle 位移 14.02m、最大速度 6.87m/s；AI walker 位移 8.33m。gate 容器
+和 RPC 2000 均已清理。
+
+该 cooked client 上 walker 的 `get_velocity()` 每帧返回 0，即使位置真实
+移动。官方 `test_walker_navigation.py` 对 AI walker 只以位移作为运动判
+定，因此 runtime gate 保留 `walker_max_speed_mps` 作为观测证据，但
+walker-motion PASS 条件改为位移达标；vehicle-motion 仍要求速度非零。
+这证明 CARLA Traffic Manager 车辆控制与 AI walker 导航在 Lavapipe
+client/cooked server 组合上可用。它仍不证明 GB10/NVIDIA Vulkan 渲染兼
+容，也不覆盖 ROS/Autoware 或长时稳定性。
+
+### 9.37 2026-09-24 Lavapipe soak gate 暴露传感器流停滞
+
+新增 `make carla-lavapipe-soak` 显式长时入口，默认
+`CARLA_RUNTIME_MODE=sensors`、`CARLA_RUNTIME_TICKS=6000`、
+`CARLA_RUNTIME_TOTAL_TIMEOUT=900`，并允许显式覆盖 mode/ticks/timeout。
+入口仍复用 `run-carla-lavapipe-sensors.sh`，不改变渲染、驱动或 client
+参数。
+
+首次 6000 tick soak 未通过。client 没有崩溃，但 world tick 在 frame 521
+停止推进；Python 侧已采集 496 个对齐 RGB/LiDAR 样本，最后样本 frame
+519，最后 world snapshot frame 520。900 秒总超时后外层 exit 124。
+第二次使用 520 tick 复验仍未通过，且停滞发生在 frame 163，说明停滞点
+不固定，不是稳定的 512 tick 边界。证据：
+`/artifacts/carla/runtime-sensors-20260924T043232Z-DLXtt7` 和
+`/artifacts/carla/runtime-sensors-20260924T045045Z-f5MzYi`。
+
+检查发现 evaluator 原来的 `AlignedQueue` 在回调溢出时不立即失败，且
+`world.tick()` 挂起时不会再进入 `frame()` 检查，导致丢失帧/流异常会被
+误报成 tick 超时。已改为记录 sticky failure，并在每个 tick 前检查两个
+传感器队列的溢出状态。该修正只改进失败归因，不改变 CARLA 运行参数。
+
+当前结论：Lavapipe sensors/actors smoke gate 可用，但 Lavapipe 长时稳
+定性仍未通过，不能标记 PASS。根因仍需在 CARLA Python sensor callback
+与 UE/Vulkan readback/streaming 的交界继续定位；这不是 NVIDIA 驱动问
+题，也没有修改驱动。
+
+### 9.38 2026-09-24 长时停滞收敛到 tick RPC 响应
+
+`actors` 模式的 1000 tick 复验也会停滞：endpoint 只完成 197 tick，最后
+Python 侧 tick frame 为 214；server log 随后仍推进到 frame 217。这说明
+UE 进程未死亡、主循环仍可继续 tick，但该次 `world.tick()` 的 RPC 响应
+没有返回给 Python client。因此此前把重点放在 sensor callback/readback
+的假设不充分；`sensors` 与 `actors` 的共同路径是同步 `tick_cue` RPC。
+证据：`/artifacts/carla/runtime-actors-20260924T072335Z-KTzVbk`。
+
+审计 wrapper 时发现失败码传播 bug：
+
+```bash
+if ! docker exec ...; then
+  code=$?
+  exit "${code}"
+fi
+```
+
+Bash 的 `!` 会把命令退出码取反，因此失败分支中的 `$?` 是 0，实际 gate
+失败时 wrapper 可能返回成功。已改为 `code=0; docker exec ... || code=$?`
+并显式检查，`make carla-lavapipe-soak CARLA_RUNTIME_MODE=bogus` 现在返
+回 exit 64，且不会启动 CARLA。
+
+同时允许 `CARLA_RUNTIME_MODE=rpc` 作为诊断对照；该模式只设置同步 world
+并连续 tick，不创建传感器或 actor。evaluator 已增加每 100 tick 的带
+flush 进度日志，便于观察长时间运行中的最后推进点。
+
+RPC-only soak 复验结果：6000 tick 请求在 Python 侧完成 677 tick 后停
+滞，最后记录 frame 691；此时 UE log 已推进到 frame 694，进程仍活着并
+继续输出 Slate 警告。900 秒外层超时后，wrapper 返回 exit 124，失败码
+传播正确。证据：
+`/artifacts/carla/runtime-rpc-20260924T073831Z-sztn5l` 和
+`/artifacts/carla/lavapipe-sensor-gate-20260924T073757Z-4t1PQF/server.log`。
+
+这把根因范围进一步收敛为：不依赖传感器流、不依赖 actor/Traffic
+Manager，也不依赖渲染 readback；问题在 CARLA 同步 `tick_cue` RPC 的
+请求/响应处理路径，表现为 client 等待某一次响应而 server 已继续后续
+frame。由于 Python `world.tick(timeout)` 的 C++ 实现包含两个等待阶段
+（同步 `SendTickCue()` RPC 和随后的 `SynchronizeFrame()` episode 等待），
+下一步需要抓取停滞时 client 线程栈并区分二者。当前长时 soak 仍为
+FAIL，不能标记 CARLA 长时稳定性通过。
+
+### 9.39 2026-09-24 Lavapipe 三种长时 soak 全部通过
+
+继续定位后确认，`no_rendering_mode` 在 cooked non-editor client 中没有
+实际生效。`CarlaEngine.cpp` 的 `OnEpisodeSettingsChanged()` 原本只在
+`WITH_EDITOR` 下设置 `GEngine->GameViewport->bDisableWorldRendering`，
+因此 server/cooked build 虽然接受并保存了 `bNoRenderingMode`，却没有
+关闭 viewport world rendering。同步长跑最终会停滞在该渲染路径与 tick
+响应之间。修复为引入 `Engine/Engine.h`，并移除该设置的 editor 条件：
+
+```cpp
+if (GEngine && GEngine->GameViewport)
+{
+  GEngine->GameViewport->bDisableWorldRendering = Settings.bNoRenderingMode;
+}
+```
+
+修复位于
+`third_party/carla/Unreal/CarlaUnreal/Plugins/Carla/Source/Carla/Game/CarlaEngine.cpp`。
+`check_carla_runtime.py` 同时明确设置
+`.no_rendering_mode = mode != "sensors"`：RPC/actors soak 关闭 world
+rendering，sensors soak 保留真实 RGB/LiDAR 渲染。
+
+ARM64 构建入口也改为可重复构建 SCW：先构建
+`ShaderCompileWorker Linux Development -NoDumpSyms`，再构建
+`CarlaUnreal LinuxArm64 Development -buildscw -NoDumpSyms`；独立 SCW
+脚本会把 executable、相关动态库和 metadata 同步到
+`Engine/Binaries/LinuxArm64/`。`tests/test_carla_ispc.py` 和
+`tests/test_carla_runtime_probes.py` 已增加对应回归断言。最终 staged
+client 为：
+
+- binary：`/artifacts/carla/cooked-client-full/CarlaUnreal/Binaries/LinuxArm64/CarlaUnreal`
+- SHA256：`6acec2a3a43076897d74d44da084a70a45e9fd4f891d9dca66052663a1027847`
+- Build ID：`b24c52beb9623cf3`
+- size：196007296 bytes
+- architecture：ELF 64-bit ARM aarch64
+
+随后分别执行 6000 tick soak，三种模式的 endpoint 与 invocation 均
+**PASS**、exit 0，且 world settings 均恢复为原始值：
+
+- RPC：
+  - runtime：`/artifacts/carla/runtime-rpc-20260924T173138Z-tRTaW9`
+  - wrapper：`/artifacts/carla/lavapipe-sensor-gate-20260924T173106Z-H5BxYI`
+  - result SHA256：`baf843ad62326c6c93cdc07b10f4ea8e7d47f8b80b68e2579ef965b355c2a7b4`
+  - 8/8 checks PASS；frames `15..6014`，elapsed
+    `21.965648..321.915653s`；`no_rendering_mode=true`，恢复为 `false`
+- Sensors：
+  - runtime：`/artifacts/carla/runtime-sensors-20260924T174556Z-xFONlm`
+  - wrapper：`/artifacts/carla/lavapipe-sensor-gate-20260924T174333Z-rrqvVM`
+  - result SHA256：`e5f2b594d3a9621056525c67a742331b1e4ab55ecd642078066d4e654c567974`
+  - 12/12 checks PASS；6000 samples，frames `24..6023`，elapsed
+    `21.375288..321.325292s`；`no_rendering_mode=false`，恢复为 `false`
+  - RGB 6000/6000 为 320x240、307200 bytes，6000 个不同 hash
+  - LiDAR 每帧 1050--1067 points，共 4601 个不同 payload hash
+- Actors：
+  - runtime：`/artifacts/carla/runtime-actors-20260924T195350Z-I1jP2v`
+  - wrapper：`/artifacts/carla/lavapipe-sensor-gate-20260924T195327Z-UMifcV`
+  - result SHA256：`cfdab120ea91efabd9a357afdcfe65584f1a35b2e50dc91d7aa904b7b36bda24`
+  - 11/11 checks PASS；frames `17..6016`，elapsed
+    `20.990066..320.940070s`；`no_rendering_mode=true`，恢复为 `false`
+  - Traffic Manager vehicle 位移 `72.09485189531614m`，最大速度
+    `24.199714256552756m/s`
+  - AI walker 位移 `71.7565369702828m`；`get_velocity()` 仍始终返回
+    `0.0`。该现象与 9.36 的 cooked client walker 观测一致，gate 继续按
+    官方 smoke test 语义使用位移判定，速度值只作为观测记录
+  - cleanup 逆序销毁 actors `171,170,169` 并恢复 world settings
+
+此前 `CARLA_RUNTIME_TOTAL_TIMEOUT` 默认值 900 秒不足以覆盖 Lavapipe
+的 6000 tick。`Makefile` 与 runtime probe 回归测试已统一改为 10800 秒，
+并保留 mode/ticks/timeout 覆盖能力。
+
+最终本地测试结果为 `make test-local` **PASS**：548 tests、56 skipped、
+0 failures。测试同时暴露并修正了 `tests/test_carla_asset.py` 与
+`tests/test_carla_runtime_entry.py` 中两处已过期的断言。
+
+Lavapipe server log 仍会出现已知的软件渲染/cooked 内容警告，包括
+`Expected source texture to be in VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL`
+以及 Town01_Opt 缺少 sky/light/weather setup、`InstancedFoliageActor_0`
+未绑定 static mesh。它们没有导致上述 gate 失败，但应继续作为 Lavapipe
+与当前 cooked client 的残余警告保留，不能据此宣称 NVIDIA GB10 Vulkan
+路径已修复。
+
+结论更新为：ARM64 cooked client/cooked server 在 Lavapipe 上的 RPC、
+RGB/LiDAR 和 Traffic Manager/AI walker 三种 6000 tick soak 均已通过，
+此前长时同步 tick 停滞得到可重复的根因修复。该结果证明软件渲染路径的
+长时间稳定性，不证明 GB10/NVIDIA Vulkan 驱动兼容性、GPU 性能、
+ROS/Autoware 集成或 full client Cook 的资产完整性。

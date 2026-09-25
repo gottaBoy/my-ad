@@ -5,16 +5,18 @@ umask 022
 mode="${CARLA_RUNTIME_MODE:-rpc}"
 ticks="${CARLA_RUNTIME_TICKS:-100}"
 port="${CARLA_RUNTIME_PORT:-2000}"
+host="${CARLA_RUNTIME_HOST:-127.0.0.1}"
 timeout_seconds="${CARLA_RUNTIME_TIMEOUT:-10}"
 total_timeout="${CARLA_RUNTIME_TOTAL_TIMEOUT:-600}"
-[[ "${mode}" == rpc || "${mode}" == sensors ]] || { echo "CARLA_RUNTIME_MODE must be rpc or sensors" >&2; exit 64; }
+[[ "${mode}" == rpc || "${mode}" == sensors || "${mode}" == actors ]] || { echo "CARLA_RUNTIME_MODE must be rpc, sensors or actors" >&2; exit 64; }
 for value in "${ticks}" "${port}" "${timeout_seconds}" "${total_timeout}"; do
   [[ "${value}" =~ ^[1-9][0-9]*$ && ${#value} -le 6 ]] || { echo "Runtime limits must be positive integers" >&2; exit 64; }
 done
 (( port <= 65535 && ticks <= 10000 && timeout_seconds <= 120 )) || {
   echo "Runtime limits are out of range" >&2; exit 64;
 }
-[[ "${mode}" != sensors || "${ticks}" -ge 2 ]] || { echo "Sensor validation needs at least two ticks" >&2; exit 64; }
+[[ "${mode}" == rpc || "${ticks}" -ge 2 ]] || { echo "${mode} validation needs at least two ticks" >&2; exit 64; }
+[[ "${host}" =~ ^[0-9A-Za-z._-]+$ ]] || { echo "CARLA_RUNTIME_HOST must be a valid hostname or IPv4 address" >&2; exit 64; }
 [[ "${CARLA_ALLOW_WORLD_MUTATION:-0}" == 1 ]] || {
   echo "Set CARLA_ALLOW_WORLD_MUTATION=1 only for an idle, exclusively owned test world" >&2; exit 64;
 }
@@ -43,8 +45,8 @@ finish() {
   final_code=$?
   [[ "${code}" != 0 ]] || code="${final_code}"
   [[ "${code}" == 0 && -s "${run_dir}/stage-report.json" ]] && status=PASS
-  printf "# Native CARLA Client Invocation\n\n- Status: %s\n- Exit code: %s\n- Endpoint: 127.0.0.1:%s\n- Mode: %s\n- Scope: endpoint checks only; server build/architecture must be established separately\n" \
-    "${status}" "${code}" "${port}" "${mode}" > "${run_dir}/decision.md"
+  printf "# Native CARLA Client Invocation\n\n- Status: %s\n- Exit code: %s\n- Endpoint: %s:%s\n- Mode: %s\n- Scope: endpoint checks only; server build/architecture must be established separately\n" \
+    "${status}" "${code}" "${host}" "${port}" "${mode}" > "${run_dir}/decision.md"
   printf "runtime artifacts=%s exit=%s\n" "${run_dir}" "${code}"
   exit "${code}"
 }
@@ -72,7 +74,7 @@ verify_inputs
 command=(
   timeout --signal=INT --kill-after=30 "${total_timeout}"
   python3 "${script_dir}/check_carla_runtime.py"
-  --mode "${mode}" --host 127.0.0.1 --port "${port}" --ticks "${ticks}"
+  --mode "${mode}" --host "${host}" --port "${port}" --ticks "${ticks}"
   --timeout "${timeout_seconds}" --run-dir "${run_dir}/endpoint" --provenance "${provenance}"
   --allow-world-mutation
 )

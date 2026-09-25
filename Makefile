@@ -11,7 +11,7 @@ CARLA_COMPOSE := docker compose --project-name "$(CARLA_COMPOSE_PROJECT_NAME)" -
 .PHONY: init preflight config build-tools build-tools-sim build-navsim up-dgx up-sim collect-sim down-dgx down-sim \
 	record record-sim replay viz scenario scenario-up scenario-prepare isaac navsim navsim-cache data deploy test-compose test-local \
 	harness-host harness-gpu harness-network harness-clock harness-runtime harness-ros harness-ros-scenario harness-navsim inspect-modules learn-module collect-env \
-	carla-config carla-g0 carla-shell carla-build-shell carla-ue-check carla-ue-setup carla-shader-deps carla-scw carla-ispc carla-ue-build carla-startup-probe carla-editor-check carla-audio-deps carla-assimp carla-ue-meshbridge carla-vulkan carla-ufbx carla-ue-ufbxbridge carla-runtime-check carla-interchange carla-manifest carla-manifest-verify carla-usd-inventory
+	carla-config carla-g0 carla-shell carla-build-shell carla-ue-check carla-ue-setup carla-shader-deps carla-scw carla-ispc carla-ue-build carla-startup-probe carla-editor-check carla-editor-deps carla-editor-build carla-editor-startup carla-editor-cook carla-full-cook carla-stage-cooked-server carla-cooked-server carla-lavapipe-sensors carla-audio-deps carla-assimp carla-ue-meshbridge carla-vulkan carla-ufbx carla-ue-ufbxbridge carla-runtime-check carla-interchange carla-manifest carla-manifest-verify carla-usd-inventory
 
 init:
 	mkdir -p data/maps/sample-map-planning data/bags data/ground_truth data/datasets data/models data/engines data/logs data/reports data/cache \
@@ -170,6 +170,69 @@ carla-editor-check:
 		-e CARLA_USD_NATIVE_ROOT="$(NATIVE_SDK_ROOT)" \
 		-e CARLA_ARM64_FBX_HEADERS_ONLY="$(or $(ARM64_FBX_HEADERS_ONLY),0)" carla-build \
 		bash /opt/my-ad/scripts/carla/probe-arm64-editor.sh
+
+
+carla-editor-deps:
+	$(CARLA_COMPOSE) --profile build run --rm -T -e CARLA_BUILD_JOBS=$(or $(JOBS),8) carla-build \
+		bash /opt/my-ad/scripts/carla/build-arm64-editor-deps.sh
+
+carla-editor-build:
+	$(CARLA_COMPOSE) --profile build run --rm -T \
+		-e CARLA_EDITOR_PROFILE=$(or $(EDITOR_PROFILE),fbx-skip) \
+		-e CARLA_EDITOR_BUILD=1 -e CARLA_EDITOR_BUILD_TIMEOUT=$(or $(EDITOR_BUILD_TIMEOUT),14400) carla-build \
+		bash /opt/my-ad/scripts/carla/probe-arm64-editor.sh
+
+carla-editor-startup:
+	$(CARLA_COMPOSE) --profile build run --rm -T \
+		-e CARLA_EDITOR_STARTUP_TIMEOUT=$(or $(EDITOR_STARTUP_TIMEOUT),60) carla-build \
+		bash /opt/my-ad/scripts/carla/probe-arm64-editor-startup.sh
+
+carla-editor-cook:
+	$(CARLA_COMPOSE) --profile build run --rm -T \
+		-e CARLA_EDITOR_COOK_TIMEOUT=$(or $(EDITOR_COOK_TIMEOUT),600) \
+		-e CARLA_EDITOR_COOK_PACKAGE="$(or $(EDITOR_COOK_PACKAGE),/Game/Carla/RT_LuminanceCapture)" \
+		-e CARLA_EDITOR_COOK_PACKAGE_EXTENSION=$(or $(EDITOR_COOK_PACKAGE_EXTENSION),uasset) carla-build \
+		bash /opt/my-ad/scripts/carla/probe-arm64-editor-cook.sh
+
+carla-full-cook:
+	$(CARLA_COMPOSE) --profile build run --rm -T \
+	-e CARLA_FULL_COOK_TIMEOUT=$(or $(FULL_COOK_TIMEOUT),1800) \
+	-e CARLA_FULL_COOK_TARGET_PLATFORM=$(or $(FULL_COOK_TARGET_PLATFORM),LinuxArm64Server) \
+	-e CARLA_FULL_COOK_RENDERING=$(or $(FULL_COOK_RENDERING),0) \
+	-e CARLA_VK_ICD_FILENAMES="$(or $(CARLA_VK_ICD_FILENAMES),)" carla-build \
+	bash /opt/my-ad/scripts/carla/probe-arm64-full-cook.sh
+
+carla-stage-cooked-server:
+	@test -n "$(FULL_COOK_OUTPUT)" || { echo "FULL_COOK_OUTPUT is required (container path)"; exit 64; }
+	$(CARLA_COMPOSE) --profile build run --rm -T \
+		-e CARLA_FULL_COOK_OUTPUT="$(FULL_COOK_OUTPUT)" \
+		-e CARLA_COOKED_SERVER_STAGE="$(or $(COOKED_SERVER_STAGE),/artifacts/carla/cooked-server-full/CarlaUnreal)" carla-build \
+		bash /opt/my-ad/scripts/carla/stage-arm64-cooked-server.sh
+
+carla-stage-cooked-client:
+	@test -n "$(FULL_COOK_OUTPUT)" || { echo "FULL_COOK_OUTPUT is required (container path)"; exit 64; }
+	$(CARLA_COMPOSE) --profile build run --rm -T \
+		-e CARLA_FULL_COOK_OUTPUT="$(FULL_COOK_OUTPUT)" \
+		-e CARLA_COOKED_CLIENT_STAGE="$(or $(COOKED_CLIENT_STAGE),/artifacts/carla/cooked-client-full/CarlaUnreal)" carla-build \
+		bash /opt/my-ad/scripts/carla/stage-arm64-cooked-client.sh
+
+carla-cooked-server:
+	$(CARLA_COMPOSE) --profile build run --rm -T \
+		-e CARLA_COOKED_SERVER_TIMEOUT=$(or $(COOKED_SERVER_TIMEOUT),30) \
+		-e CARLA_COOKED_SERVER_ROOT="$(or $(COOKED_SERVER_ROOT),/artifacts/carla/cooked-server/CarlaUnreal)" \
+		-e CARLA_COOKED_SERVER_MAP="$(or $(COOKED_SERVER_MAP),/Game/Carla/Maps/OpenDriveMap)" \
+		-e CARLA_COOKED_SERVER_PORT=$(or $(COOKED_SERVER_PORT),7777) \
+		-e CARLA_COOKED_SERVER_REQUIRE_CONTENT=$(or $(COOKED_SERVER_REQUIRE_CONTENT),1) carla-build \
+		bash /opt/my-ad/scripts/carla/probe-arm64-cooked-server.sh
+
+carla-lavapipe-sensors:
+	bash scripts/carla/run-carla-lavapipe-sensors.sh
+
+carla-lavapipe-soak:
+	CARLA_RUNTIME_MODE=$(or $(CARLA_RUNTIME_MODE),sensors) \
+	CARLA_RUNTIME_TICKS=$(or $(CARLA_RUNTIME_TICKS),6000) \
+	CARLA_RUNTIME_TOTAL_TIMEOUT=$(or $(CARLA_RUNTIME_TOTAL_TIMEOUT),10800) \
+	bash scripts/carla/run-carla-lavapipe-sensors.sh
 
 .PHONY: carla-legacy-fbx carla-usd-sdk
 carla-legacy-fbx:

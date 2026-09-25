@@ -35,6 +35,7 @@ RUN apt-get update \
         libssl-dev \
         libvulkan1 \
         libvulkan-dev \
+        mesa-vulkan-drivers \
         lld \
         locales \
         make \

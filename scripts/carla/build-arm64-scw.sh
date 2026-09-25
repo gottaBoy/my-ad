@@ -30,8 +30,26 @@ timeout "${CARLA_SCW_BUILD_TIMEOUT:-1800}" bash "${ue_dir}/Engine/Build/BatchFil
   ShaderCompileWorker Linux Development "-MaxParallelActions=${jobs}" 2>&1 | tee "${run_dir}/build.log"
 step=architecture
 worker="${ue_dir}/Engine/Binaries/Linux/ShaderCompileWorker"
+worker_arm64="${ue_dir}/Engine/Binaries/LinuxArm64/ShaderCompileWorker"
 file "${worker}" | tee "${run_dir}/architecture.txt"
 grep -q "ARM aarch64" "${run_dir}/architecture.txt"
+mkdir -p "$(dirname "${worker_arm64}")"
+cp -a "${worker}" "${worker_arm64}"
+for worker_library in "${ue_dir}/Engine/Binaries/Linux"/libShaderCompileWorker-*; do
+  [[ -f "${worker_library}" ]] || continue
+  cp -a "${worker_library}" "${ue_dir}/Engine/Binaries/LinuxArm64/"
+done
+if [[ -f "${worker}.debug" ]]; then
+  cp -a "${worker}.debug" "${worker_arm64}.debug"
+fi
+if [[ -f "${worker}.sym" ]]; then
+  cp -a "${worker}.sym" "${worker_arm64}.sym"
+fi
+for worker_metadata in target modules version; do
+  if [[ -f "${worker}.${worker_metadata}" ]]; then
+    cp -a "${worker}.${worker_metadata}" "${worker_arm64}.${worker_metadata}"
+  fi
+done
 step=dynamic-linkage
 for binary in "${worker}" \
   "${ue_dir}/Engine/Binaries/Linux/libShaderCompileWorker-ShaderCompilerCommon.so" \

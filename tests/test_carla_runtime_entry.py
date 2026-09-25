@@ -46,7 +46,8 @@ class RuntimeEntryTest(unittest.TestCase):
     def test_entry_is_native_local_bounded_and_offline(self):
         text = SCRIPT.read_text()
         self.assertIn('[[ ! -f /.dockerenv || "$(uname -m)" != aarch64 ]]', text)
-        self.assertIn("--host 127.0.0.1", text)
+        self.assertIn('host="${CARLA_RUNTIME_HOST:-127.0.0.1}"', text)
+        self.assertIn('--mode "${mode}" --host "${host}" --port "${port}"', text)
         self.assertIn("--no-index --no-deps --force-reinstall", text)
         self.assertIn("timeout --signal=INT --kill-after=30", text)
         self.assertIn("wheel.sha256", text)

@@ -4,6 +4,7 @@ import ast
 import hashlib
 import importlib.util
 import json
+import subprocess
 import os
 from pathlib import Path
 import platform
@@ -59,6 +60,40 @@ class TbbStaticTest(unittest.TestCase):
         rules = (ROOT / "third_party/unreal-engine/Engine/Source/ThirdParty/Intel/TBB/IntelTBB.Build.cs").read_text()
         for token in ('"libtbb.a"', '"libtbbmalloc.a"', '"TBB_USE_EXCEPTIONS=0"', "IntelTBB-2019u8"):
             self.assertIn(token, rules)
+
+    def test_ue_rules_append_arm64_rtti_helper_after_tbb_archives(self):
+        rules = (ROOT / "third_party/unreal-engine/Engine/Source/ThirdParty/Intel/TBB/IntelTBB.Build.cs").read_text()
+        self.assertIn("Target.Architecture == UnrealArch.Arm64", rules)
+        self.assertIn('"usd", "tbb-rtti-arm64", "libtbb-rtti.a"', rules)
+        self.assertIn("Missing ARM64 TBB RTTI helper library", rules)
+        tbb = rules.index('"libtbb.a"')
+        helper = rules.index('"usd", "tbb-rtti-arm64", "libtbb-rtti.a"')
+        self.assertLess(tbb, helper)
+
+    def test_arm64_rtti_helper_abi_contract(self):
+        directory = ROOT / "artifacts/carla/usd/tbb-rtti-arm64"
+        source = (directory / "task-rtti.cpp").read_text()
+        for token in (
+            'extern const unsigned char _ZTVN10__cxxabiv117__class_type_infoE[]',
+            'extern const char _ZTSN3tbb4taskE[] = "tbb::task"',
+            'extern const TbbTaskTypeInfo _ZTIN3tbb4taskE',
+            "_ZTVN10__cxxabiv117__class_type_infoE + 16",
+        ):
+            self.assertIn(token, source)
+        self.assertNotIn("typeid", source)
+
+        archive = directory / "libtbb-rtti.a"
+        self.assertEqual(b"!<arch>\n", archive.read_bytes()[:8])
+        result = subprocess.run(
+            ["docker", "exec", "carla-build-session", "/usr/lib/llvm-18/bin/llvm-nm", "-A",
+             "/artifacts/carla/usd/tbb-rtti-arm64/libtbb-rtti.a"],
+            capture_output=True, text=True, check=True,
+        )
+        self.assertIn(" D _ZTIN3tbb4taskE", result.stdout)
+        self.assertIn(" R _ZTSN3tbb4taskE", result.stdout)
+        self.assertIn(" U _ZTVN10__cxxabiv117__class_type_infoE", result.stdout)
+        self.assertNotIn("_ZTI3tbb4task", result.stdout.replace("_ZTIN3tbb4taskE", ""))
+        self.assertNotIn(" _ZTV3tbb4task", result.stdout)
 
     def test_smoke_exercises_runtime_and_malloc_not_header_only(self):
         source = SMOKE.read_text()

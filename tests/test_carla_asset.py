@@ -119,7 +119,8 @@ class AssetRoundtripTest(unittest.TestCase):
         runner = (SCRIPTS / "probe-arm64-asset.sh").read_text()
         self.assertIn("<bUsePCHFiles>false</bUsePCHFiles>", build_configuration)
         self.assertIn('material_patch="${scripts}/patches/material-editor-boundary.patch"', runner)
-        self.assertIn("Material editor API boundary patch is already applied", runner)
+        self.assertIn('apply_patch_idempotent "${material_patch}"', runner)
+        self.assertIn('printf "%s already applied: %s\\n" "${label}" "${file}"', runner)
         self.assertIn('"${animation_patch}" "${material_patch}"', runner)
 
 
