@@ -67,6 +67,7 @@ command=(
   -stdout
   -FullStdOutLogOutput
   -ddpi:LinuxArm64:bIsEnabled=true
+  -handleensurepercent=0
   -ddc=NoZenLocalFallback
   -NoAssetRegistryCacheWrite
   -NoP4
@@ -159,10 +160,15 @@ du -sb "${output_dir}" | awk '{print $1}' > "${run_dir}/output-bytes.txt"
 
 # COOKDIR is a filesystem path. A package path such as /Game/Carla is silently
 # ignored by recursive enumeration and under-cooks the client.
-for package_name in SM_PlasticBag SM_StreetAD01 SM_calibration; do
-  package_path="${output_dir}/CarlaUnreal/Content/Carla/${package_name}.uasset"
+expected_packages=(
+  "Static/Dynamic/00_LegacyAssets/PedestrianProps/SM_PlasticBag.uasset"
+  "Static/Static/00_LegacyAssets/SM_StreetAD01.uasset"
+  "Static/Static/Materials/Calibrator/SM_calibration.uasset"
+)
+for package_suffix in "${expected_packages[@]}"; do
+  package_path="${output_dir}/CarlaUnreal/Content/Carla/${package_suffix}"
   [[ -f "${package_path}" ]] || {
-    echo "Expected cooked CARLA package is missing: ${package_name}" >&2
+    echo "Expected cooked CARLA package is missing: ${package_path}" >&2
     exit 3
   }
 done

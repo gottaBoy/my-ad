@@ -1788,3 +1788,55 @@ RGB/LiDAR 和 Traffic Manager/AI walker 三种 6000 tick soak 均已通过，
 此前长时同步 tick 停滞得到可重复的根因修复。该结果证明软件渲染路径的
 长时间稳定性，不证明 GB10/NVIDIA Vulkan 驱动兼容性、GPU 性能、
 ROS/Autoware 集成或 full client Cook 的资产完整性。
+
+### 9.40 2026-09-25 ARM64 LinuxArm64Client full Cook 通过
+
+复核 9.35 中失败的 `cookall` 证据后确认，该运行发生在
+`DefaultGame.ini` 的 `DirectoriesToNeverCook` 修复提交之前：当时 run 的
+`carla-tracked.patch` 为空，而当前配置已排除 `/CarlaTools`、
+`/Game/Carla/HoudiniEngine`、`PedestrianOnSidecar`、
+`BP_multipleLights`、`WD_RepSplinePlaneCreator`、`BP_Signs` 和
+`TrafficLights2025/DataTables`。旧日志中的主要错误正是这些 editor-only、
+失效 rig/skeleton、Houdini 和 DataTable 资产。
+
+使用当前配置和 Lavapipe ARM64 ICD 重新执行
+`scripts/carla/probe-arm64-full-cook.sh` 后，旧错误集全部消失。第一轮
+复验 Cook body 已完成，但 UE 因唯一的
+`KnownCompositeTexture == CompositeTexture` ensure 退出 1：
+`T_Concrete_04_d` 的 stale `CompositeTexture` 指向
+`Pathway_Block_Mat_BaseColor`。该 ensure 本身是 UE 的 legacy 资产兼容性
+检查，随后代码会调用 `NotifyIfCompositeTextureChanged()` 自动修复内存
+状态；它不是 ARM64 Cook 失败。因此 probe 在 unattended commandlet 中
+显式加入 UE 支持的 `-handleensurepercent=0`，只抑制该类 handled ensure
+报告，不修改资产、驱动或 runtime 配置。
+
+同时修正 probe 的 sentinel package 断言。原断言误以为
+`SM_PlasticBag`、`SM_StreetAD01`、`SM_calibration` 位于
+`Content/Carla` 根目录；实际 cooked 输出必须保持源目录层级。现在检查：
+
+```text
+Static/Dynamic/00_LegacyAssets/PedestrianProps/SM_PlasticBag.uasset
+Static/Static/00_LegacyAssets/SM_StreetAD01.uasset
+Static/Static/Materials/Calibrator/SM_calibration.uasset
+```
+
+最终正式证据：
+
+- run：
+  `/artifacts/carla/full-cook-20260925T021502Z-56QjA2`
+- status：`PASS`，step `complete`，probe exit 0
+- target：`LinuxArm64Client`，rendering cook enabled，Lavapipe ICD
+- Cook：43,779 packages cooked，88 skipped by platform，total 43,867
+- UE summary：`Success - 0 error(s), 36978 warning(s)`
+- output：93,374 files，48,469,129,218 bytes，约 46GB
+- `cook.log` SHA256：
+  `44e4b95c1db55f73438d849658f65d313d64b870bcc2502cf4eb98564cd83dd2`
+- `output-files.txt` SHA256：
+  `d83aa0034a51fc53fae438663ec45d458c801962942c9ece52c4eb7be915e4fc`
+
+该 PASS 只覆盖 `Content/Carla` 的完整 ARM64 client Cook 及三个 sentinel
+package 存在性检查，不包含 staging、client RPC、传感器或 traffic/walker
+gate。日志仍有 36,978 个 warning，主要是 legacy material sampler 类型、
+缺少引用、软件渲染/Nanite card generation 和 UE editor material 序列化
+警告；因此它证明 Cook/资产编译路径通过，不能宣称资产质量或视觉正确性
+全部通过。
