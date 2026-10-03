@@ -1709,6 +1709,29 @@
         "make test-local"
       ],
       "boundary": "It checks the bundle against its own report.json, so it cannot detect a wrong collection upstream of the JSON, and it validates whichever bundle is newest rather than a fixed one. It also does not re-verify the vendor bundle's physics: the replay discriminator and the excluded list are reported from the earlier measurements, not re-measured here."
+    },
+    {
+      "id": "fork-work-committed-and-pushed",
+      "category": "reproducibility",
+      "change": "Commit and push both fork branches and regenerate the records that describe them. third_party/carla dgx-arm64 -> origin (gottaBoy/carla, 234caf5..f6cbc59), third_party/unreal-engine dgx-arm64 -> gottaBoy (693d44c72..5502950e1, including five commits that had never been pushed), plus an ignore rule for the shader diagnostics the probes write into the CARLA project tree. Add make carla-fork-provenance-install, which writes the runtime record inside the container with safe.directory set through GIT_CONFIG_* because the container runs as root while the forks belong to the host user.",
+      "reason": "Until this, the tree that produces the staged binaries existed only as a dirty working tree on one machine: the manifest and provenance recorded HEAD plus the digest of an uncommitted delta, so the recorded revision could not reproduce the build, and one stray git checkout would have destroyed the ARM64 work - the same accident that cost 46 ledger entries earlier. Five of the UE files were untracked while being compile inputs (CarlaVulkanObjectLifecycle.h and VulkanGraphicsDiagnostic.{h,cpp} are included by tracked sources, and the two .cpp stubs compile by module rule), so HEAD plus the tracked delta could not describe the binary at all. The install target exists because the runtime record had only ever been refreshed by hand, which is how it went stale and made --verify report ten drifted fields.",
+      "paths": [
+        "Makefile",
+        "scripts/carla/patches/README.md",
+        "scripts/carla/patches/fork-working-tree-delta-carla.patch",
+        "scripts/carla/patches/fork-working-tree-delta-ue.patch",
+        "docs/carla-dgx-audit.md",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-handoff.md"
+      ],
+      "validation": [
+        "git push both forks (carla fast-forward, ue fast-forward, upstream set)",
+        "make carla-fork-provenance-install then carla-fork-provenance-verify PASS (both forks tracked_dirty=0 untracked=0)",
+        "make carla-fork-delta then carla-fork-delta-verify PASS (both deltas now empty, sha256 e3b0c442...)",
+        "python3 -m unittest discover -s tests (826 tests, 0 failures)",
+        "make test-local"
+      ],
+      "boundary": "This makes the source reproducible, not the product accepted: the GB10 mainline still needs a GPU and a vendor answer, and the fork branches were pushed to the gottaBoy forks, not upstreamed. The two frozen delta patches are now empty files that assert the trees are clean; they no longer carry any text that could rebuild the tree, which is why the commit history on the fork branches is now the record."
     }
   ]
 }

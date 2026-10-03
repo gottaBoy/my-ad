@@ -360,11 +360,28 @@ carla-gb10-driver-report:
 # Records what the two CARLA forks actually are: HEAD plus the tracked
 # working-tree delta the staged binaries are built from. A bare commit hash
 # cannot pin these trees, because the ARM64/editor-only patches and the
-# diagnostic instrumentation live as uncommitted modifications. See
-# docs/carla-dgx-audit.md 9.86.
+# diagnostic instrumentation used to live as uncommitted modifications. Since
+# the fork work was committed and pushed, both fields record an empty delta -
+# which is the point: the record now says the trees are clean. See
+# docs/carla-dgx-audit.md 9.86 and 9.93.
 .PHONY: carla-fork-provenance
 carla-fork-provenance:
 	python3 scripts/carla/report_fork_provenance.py $(if $(OUTPUT),--output $(OUTPUT),)
+
+# Installs the runtime record the probes consume. It lives under artifacts/, which the container
+# owns, so the write has to happen in there; the paths recorded are container paths for the same
+# reason. The container runs as root while the mounted forks are owned by the host user, so git
+# refuses them as "dubious ownership" and has to be told to trust these two checkouts.
+.PHONY: carla-fork-provenance-install
+carla-fork-provenance-install:
+	$(CARLA_COMPOSE) --profile build run --rm -T \
+		-e GIT_CONFIG_COUNT=2 \
+		-e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/workspace/carla \
+		-e GIT_CONFIG_KEY_1=safe.directory -e GIT_CONFIG_VALUE_1=/workspace/unreal-engine \
+		carla-build \
+		python3 /opt/my-ad/scripts/carla/report_fork_provenance.py \
+		--carla-repo /workspace/carla --ue-repo /workspace/unreal-engine \
+		--output /artifacts/carla/cooked-server-full/runtime-provenance.json
 
 # Re-derives the provenance from the live trees and reports every field where
 # the recording disagrees, so a stale revision is detected instead of being

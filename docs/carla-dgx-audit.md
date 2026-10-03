@@ -4632,6 +4632,39 @@ stack?)`），但阶段问题已被 `exit` 断点回答，所以它不再是前�
 / `validation.log` / `decision.md`）。它与 GB10 厂商包是**两条独立线索**，封面明确写了不要
 互相外推。
 
+### 9.93 2026-10-03（本地）fork 工作树已提交并推送；记录口径从「脏树 + 冻结增量」改为「分支 HEAD」
+
+第 9 项一直挂着的那条：两个 fork 的改动**只存在于本机脏工作树**。本轮把它做成了可复现的资源。
+
+**推送结果**（实测，不是计划）：
+
+| fork | 分支 | remote | 推送 | 结果 |
+| --- | --- | --- | --- | --- |
+| `third_party/carla` | `dgx-arm64` | `origin` = `gottaBoy/carla` | `234caf5..f6cbc59` | 1 个 tracked 改动 + `.gitignore` 忽略 `Saved_shaderdiag/` |
+| `third_party/unreal-engine` | `dgx-arm64` | `gottaBoy` | `693d44c72..5502950e1`（含 5 个从未推送的 commit） | 92 个 tracked + **5 个未跟踪源文件** |
+
+**那 5 个未跟踪文件是真问题，不是洁癖**：`CarlaVulkanObjectLifecycle.h`、`VulkanGraphicsDiagnostic.{h,cpp}`
+被**已跟踪的**源文件 include（`VulkanChunkedPipelineCache.cpp`、`VulkanMemory.cpp`、
+`VulkanCommands.cpp`、`VulkanPipelineState.cpp`），而 `MovieSceneToolsARM64Stub.cpp`、
+`FbxLogCategory.cpp` 按 UE 的模块规则也会被自动编译。也就是说：**在提交之前，
+「HEAD + tracked delta」根本描述不出产出二进制的树**——manifest 只能靠快照，而快照在
+`artifacts/` 下且不入库。现在它们进了 commit。
+
+**记录随之重生成（顺序不能颠倒）**：提交之后「未提交 delta」变空，所以
+`make carla-fork-provenance` 与 `make carla-fork-delta` 必须重跑，否则 `--verify` 报 DRIFT。
+新记录：两者都是 `tracked_dirty=0` / `untracked=0`，`tracked_diff_sha256` = 空串 sha256
+（`e3b0c44298fc1c14…`）；两个冻结 delta 补丁变成 **0 字节**——**空文件在这里是有意义的断言**：
+它说这两棵树是干净的，谁再弄脏，`make carla-fork-delta-verify` 立刻失败。
+
+**顺带修掉一个只能靠手工的环节**：`report_fork_provenance.py` 默认只打印、不落盘，运行时要写入
+`artifacts/carla/cooked-server-full/`（root 所有），所以此前那次「重装」是手工做的、后来就陈旧了
+（`--verify` 报 10 个字段漂移）。新增 `make carla-fork-provenance-install` 在容器里写这份记录；
+它还暴露了第二个坑：容器以 root 跑、fork 属于宿主用户，git 直接拒绝（`detected dubious ownership`），
+所以该 target 用 `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_*` 传入 `safe.directory` 而不是放宽全局配置。
+
+**边界**：这解决的是「源码是否可复现」，**没有**解决验收；GB10 侧仍然缺 GPU，`dgx-arm64` 的
+上游仍是 `CarlaUnreal/UnrealEngine`（本案只推到了 `gottaBoy` 的 fork 分支）。
+
 **9.91/9.92 里那批「提案」和「厂商包」的共性**：本轮结束时，两条线索都停在「等人做决定」
 （发厂商包；定引擎修复落点），再加上第三条待定规则（fork 改动如何固化）。这三件事原来散在
 audit 与 todo 里，读者要自己拼。现新增 `docs/carla-handoff.md`：**只放决策队列**——每条写清

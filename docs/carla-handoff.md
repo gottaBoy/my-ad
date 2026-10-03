@@ -53,34 +53,18 @@
 - 有测试钉住两个方向：提案**仍可干净应用**且**仍未在树里**
   （`tests/test_carla_ue_shutdown_upstream_proposal.py`）——应用与否必须是显式决定。
 
-### 3. fork 改动固化方式 —— 需要你定规则
+### 3. fork 改动固化方式 —— **已定并已完成（2026-10-03）**
 
-**实测现状（2026-10-03）**：
+结论：**提交并在 `gottaBoy` 下推送**，因此「产出二进制的树」不再只存在于某台机器的脏工作树里。
 
-| fork | 分支 | remote | 未推送 | 未提交 | 未跟踪 |
-| --- | --- | --- | --- | --- | --- |
-| `third_party/carla` | `dgx-arm64` | `origin` = `gottaBoy/carla` | **ahead 2** | 1 个 tracked（`DefaultInput.ini`） | 6 |
-| `third_party/unreal-engine` | `dgx-arm64` | `gottaBoy`（另有 `origin` = `CarlaUnreal/UnrealEngine`） | **分支无 upstream（从未推送）** | **92 个 tracked** | 5 |
+- carla `dgx-arm64` → `origin`（`gottaBoy/carla`）：`234caf5..f6cbc59`
+- ue `dgx-arm64` → `gottaBoy`（已设 upstream）：`693d44c72..5502950e1`，含 5 个此前从未推送的 commit
+- 记录随之重生成：provenance 与 manifest 现在都是 `tracked_dirty=0` / `untracked=0`，
+ `tracked_diff_sha256` = 空串的 sha256（`e3b0c442…`）；两个冻结 delta 补丁变成 0 字节，
+ 这正是「工作树干净」的断言——有人再弄脏它，`make carla-fork-delta-verify` 会失败。
 
-**建议：提交并推送到 `gottaBoy` 下的分支**，理由是现在「产出二进制的树」的唯一副本是这台机器上的**脏工作树**：
-
-1. manifest / provenance 记的是 fork HEAD **加上未提交 delta 的 sha256**——只拿 HEAD 复现不出构建；
-2. 本轮我已经因为一次误 `git checkout` 丢掉过 46 条 ledger；同样的事故发生在 92 个未提交文件的 UE fork 上，丢的是 ARM64 构建本身；
-3. carla fork 的 `origin` 已经就是 `gottaBoy/carla`，只是那 2 个 commit 没推。
-
-**顺序很重要（会连锁失效）**：
-
-```bash
-# 1) 先分拣未跟踪项（例如 UE 的 Saved_shaderdiag/ 是诊断输出，应进 .gitignore 而不是提交）
-# 2) 两个 fork 各自提交 dgx-arm64
-# 3) 推送：carla → origin；ue → gottaBoy（设 upstream）
-# 4) 再重生成主仓记录（否则 --verify 报 DRIFT）
-m make carla-fork-provenance && make carla-fork-delta
-```
-
-第 4 步不能省：提交之后「未提交 delta」变成空，冻结的 `fork-working-tree-delta-*.patch` 与 manifest 的 `tracked_diff_sha256` 都会对不上。
-
-**需要你确认的点**：推送要你的凭据（我这里没有）；`gottaBoy/UnrealEngine` 若是公开仓，请确认 UE 源码的发布方式符合你们对 Epic EULA 的处理（本项目的 `origin` 本来就是公开的 `CarlaUnreal/UnrealEngine`，但这是你的判断）。若决定不推送，现有回退是主仓里冻结的 delta 补丁——但它是 `git diff --binary HEAD` 的文本导出，**不覆盖未跟踪文件**（那部分只在 `artifacts/` 的 manifest 快照里，而它不入库），所以回退比推分支弱。
+（原先这里写的是「需要你定规则」；规则已按上面的方式定下并执行。若将来要改回「冻结增量」模型，
+只需停止提交 fork 并重新 `make carla-fork-delta`。）
 
 ## 不依赖上述决定的下一步（可继续推进）
 

@@ -22,6 +22,11 @@
 | `fork-working-tree-delta-carla.patch` | CARLA fork 的未提交 delta |
 | `fork-working-tree-delta-ue.patch` | UE fork 的未提交 delta |
 
+**2026-10-03 更新：两个 delta 现在都是 0 文件 / 0 字节。** 因为两个 fork 的改动已经提交并推送到
+`gottaBoy` 下的 `dgx-arm64`（carla `f6cbc59b…`、ue `5502950e…`，两者都是 `tracked_dirty=0`、
+`untracked=0`），不再有「未提交的树」可冻结。**空文件在这里是有意义的记录**：它断言两棵 fork
+工作树是干净的，并会让 `verify` 在有人重新弄脏工作树时立刻失败。
+
 它们**不被任何脚本自动应用**。作用是把「产出二进制的树」写进仓库，而不是只存在
 `artifacts/` 下那份时点 manifest 里。
 
@@ -37,7 +42,7 @@ make carla-fork-delta-verify  # 检查冻结的补丁是否仍等于当前工作
 （同一条 `git diff --binary HEAD`），所以三份记录里的同一个 sha256 指同一件事。
 
 改动精选补丁**不会**让增量补丁失效；只有 fork 工作树本身变化才会。
-见 `docs/carla-dgx-audit.md` 9.89。
+见 `docs/carla-dgx-audit.md` 9.89，以及 9.93（提交并推送之后为什么这两个文件是空的）。
 
 ## 3. 提案（`ue-gpumessaging-shutdown-guard.patch`）
 

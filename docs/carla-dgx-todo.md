@@ -32,7 +32,7 @@ RGB/LiDAR 有效数据、持续稳定运行及可复现部署。当前未达到�
 | 停服采集接 GB10 profile、`Shutdown:` 字段接 GB10 记录 | 代码可写，但**跑不了**（要 GPU 才产生新证据） | GPU 可达 |
 | 第 3 项下一步：串行化扩展到 `vkCreateShaderModule`/layout/descriptor/cache 入口 | 同上，需 GPU 才有证据；且 39 运行已否掉「验证层」这条 | GPU 可达 |
 | 应用引擎修复提案 | 属上游生命周期契约，影响所有 GPU message 使用者 | 上游/维护者定落点 |
-| 第 9 项：fork 改动固化方式（UE 92 个 tracked 修改、83 个无精选补丁） | 规则未定；两条 fork 的未提交改动目前只存在于本机脏工作树 | 你定：**已给建议**——提交并推送到 `gottaBoy` 分支（carla `origin` 已指 `gottaBoy/carla` 且 ahead 2；UE 的 `dgx-arm64` 从未推送），随后必须重生成 provenance/delta，顺序见 `docs/carla-handoff.md` |
+| 第 9 项：fork 改动固化方式 | **已定并已完成（2026-10-03）** | 两 fork 已提交并推送（carla `f6cbc59b`、ue `5502950e`），provenance 与 manifest 均为 `tracked_dirty=0`/`untracked=0`，冻结 delta 为空——见 `docs/carla-handoff.md` 与 audit 9.93 |
 | 发送 GB10 厂商包 | **已从"建议"降级为"备选"**：证据核心只有 2 条符号栈 + 1 条判别实验，故障非确定性 ⇒ 对方大概率回「请给可复现样本」 | 你的渠道；若无渠道则此路作废 |
 | 重定 GB10 验收范围 | 产品决策 | 你/组织 |
 
