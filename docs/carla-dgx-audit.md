@@ -1546,7 +1546,8 @@ Lumen hardware ray tracing 和 MegaLights compute permutations。证据：
 25.2.8/20.1.2 后，SM6 PSO 创建不再崩溃。该路径同时禁用 bindless
 resources/samplers、ray tracing、Lumen、Nanite 和 volumetric cloud，
 并使用已验证的 `OverrideGlobalShaderCache-VULKAN_SM6.bin`
-（SHA256 `414078ae10cb7ff91d6ffc8718c970bbe62430a32bb4924bbf1bb3e1d67399a3`）。
+（实测 53,790,984 字节，SHA256 `414078ae10cb7ff91d6ffc8718c970bbe62430a32bb4924bbf1bb3a1d67399a3`；
+2026-10-03 更正：本节此前记的值为 `…bbf1bb3e1d…`，与实际磁盘文件差 1 个十六进制字符，见 9.94）。
 
 第二次 `LinuxArm64Client` full Cook 位于
 `/artifacts/carla/client-full-cook-sm6-lavapipe/full-cook-20260923T181633Z-NwMhgV`，
@@ -4672,3 +4673,44 @@ audit 与 todo 里，读者要自己拼。现新增 `docs/carla-handoff.md`：**
 todo（三个文件角色不重叠）。`tests/test_carla_handoff.py`（6 项）钉住它「短且不腐」：页里
 引用的每个 `artifacts/...` 路径都必须真实存在、两份递交包都必须指到、三条决策都必须具名、
 并且**驱动不可更换**这条约束必须在页面上活着（否则厂商包会被读成「换个驱动试试」）。
+
+### 9.94 2026-10-03（本地）渲染 full cook 的 SM6 shader cache 卡点已解决且已固化；更正 9.35 的哈希
+
+9.29 把「ARM64/Vulkan shader compiler 路径」记为阻塞（SM6 的 SPIRV-Reflect assertion、
+SM5 的 `libnvidia-glvkspirv` SIGSEGV，两者都发生在 UE global shader cook 阶段）。本轮把
+`artifacts/carla/full-cook-20260925T*` 逐个核对，结论必须分成两半。
+
+**（一）这个卡点已经解决，而且已经固化。** 14 次 full cook 中 6 次 `Status: PASS`
+（exit 0）：`002342Z-hwxBwx`、`003325Z-vI4bTP`、`005105Z-mCOyrZ`、`021502Z-56QjA2`、
+`041948Z-8nNCyN`、`050033Z-z2Sdhk`；除 `hwxBwx`（无 cache，非渲染 cook）之外的 5 次
+PASS 都产出了 `cooked/Engine/GlobalShaderCache-VULKAN_SM6.bin`，全部 14 次里 11 次产出
+该文件。也就是说 SM6 global shader cache 已能在本机被例行生成。
+
+配方不在手工命令里，而在 `scripts/carla/probe-arm64-full-cook.sh`：`CARLA_VK_ICD_FILENAMES`
+可传入任意 Vulkan ICD（Lavapipe 用 `/usr/share/vulkan/icd.d/lvp_icd.aarch64.json`），
+`CARLA_FULL_COOK_RENDERING=1` 时脚本自动追加
+`-AllowCommandletRendering -RenderOffScreen -AllowCPUDevices -SkipVulkanProfileCheck`，
+并加 `[SF_VULKAN_SM6] BindlessResources=Disabled`、`BindlessSamplers=Disabled`、
+`bEnableRayTracing=False`；脚本注释说明 cook 期与运行期共用同一份渲染 scope 列表。
+其中 `-AllowCPUDevices -SkipVulkanProfileCheck` 正是 9.23 那次手工 `-run=CookGlobalShaders`
+得以成功的那两个开关。
+
+**（二）更正本轮里我说错的一句话。** 先按 `grep -rn CookGlobalShaders docs/ scripts/ Makefile`
+零命中，就说了「这条解法没有固化」。这不准确：**只有单独跑 shader cache 的那条命令**
+（生成 `OverrideGlobalShaderCache-VULKAN_SM6.bin`）没固化——那是 9.23 手工做的一次，
+2026-09-23 的 5 次尝试在工具链镜像的 Mesa 23.2.1 上全部失败（exit 1 / 1 / 1 / 139 / 139），
+升到 `carla-lavapipe-2404` 的 Mesa/LLVM 25.2.8/20.1.2 才成功；**渲染 full cook 的等价
+配方（`-run=Cook`）早就固化了**，并已在 2026-09-25 多次 PASS。
+
+**（三）把 9.35 的哈希改正。** 9.35 此前记的 `OverrideGlobalShaderCache-VULKAN_SM6.bin`
+SHA256 为 `…bbf1bb3e1d67399a3`，磁盘实测为 `…bbf1bb3a1d67399a3`——差 1 个十六进制字符，
+已按实测值改，并补上 53,790,984 字节。该哈希在全仓所有 SM6 cache 中唯一（另有
+`cooked-client-full/Engine/GlobalShaderCache-VULKAN_SM6.bin`，53,757,589 字节，SHA256
+`cc2003758ea421d74930c8c32abc3936d1d6e95b8251b3c5a88d27c5f100717d`，与 9.25 的多次 full cook
+产出一致）。无法判定先前是转写笔误还是文件被重新生成过，故声明为「按当前磁盘文件更正」。
+
+**仍未解决（与本卡点无关，属另一问题）**：`-cookall` 的资产错误仍使 8 次 run `BLOCKED`
+（含 `053759Z-rnqEct` exit 139）；`020849Z-kYU5nU` 是 exit 0 却仍判 `BLOCKED`，说明除退出码
+之外还有别的门（缺图等）在拦。运行期 NVIDIA 路径的 PSO 创建崩溃仍在，客户端只能走
+Lavapipe；长时稳定性（9.37）仍未达标。**因此：构建期「卡在 Vulkan」= 已解决；
+GB10 GPU 上的运行期与长时验收 = 仍未解决。**

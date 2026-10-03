@@ -1732,6 +1732,38 @@
         "make test-local"
       ],
       "boundary": "This makes the source reproducible, not the product accepted: the GB10 mainline still needs a GPU and a vendor answer, and the fork branches were pushed to the gottaBoy forks, not upstreamed. The two frozen delta patches are now empty files that assert the trees are clean; they no longer carry any text that could rebuild the tree, which is why the commit history on the fork branches is now the record."
+    },
+    {
+      "id": "rendering-full-cook-sm6-shader-cache-resolved",
+      "category": "cook-runtime",
+      "change": "Record that the ARM64/Vulkan global-shader-cook blocker is solved and codified, and retract the claim that it was never codified. The rendering full cook accepts any Vulkan ICD through CARLA_VK_ICD_FILENAMES, and CARLA_FULL_COOK_RENDERING=1 makes the script add -AllowCommandletRendering -RenderOffScreen -AllowCPUDevices -SkipVulkanProfileCheck plus the SF_VULKAN_SM6 BindlessResources/BindlessSamplers Disabled and bEnableRayTracing False overrides. On 2026-09-25 six of fourteen recorded full cooks passed and eleven produced cooked/Engine/GlobalShaderCache-VULKAN_SM6.bin.",
+      "reason": "Audit 9.29 left the ARM64 shader compiler path as a blocker, which made the whole pipeline read as unreachable, and a grep for the CookGlobalShaders commandlet returned nothing, so the build-time workaround was reported as uncodified. Only the standalone shader-cache commandlet is uncodified; the equivalent full-cook recipe is codified and has passed repeatedly. The record had to separate build-time shader cook, which is solved, from the GB10 GPU runtime and long-run acceptance, which are not.",
+      "paths": [
+        "scripts/carla/probe-arm64-full-cook.sh",
+        "docs/carla-dgx-audit.md",
+        "docs/carla-dgx-todo.md"
+      ],
+      "validation": [
+        "artifacts/carla/full-cook-20260925T*/ : 6 runs Status PASS, 8 BLOCKED, 11 with cooked/Engine/GlobalShaderCache-VULKAN_SM6.bin",
+        "scripts/carla/probe-arm64-full-cook.sh requires an ICD when CARLA_FULL_COOK_RENDERING=1 and adds the four workaround flags plus the three ini overrides",
+        "python3 -m unittest discover -s tests",
+        "make test-local"
+      ],
+      "boundary": "Solved means the shader cache can be produced, not that the cook passes: eight of the fourteen runs are still BLOCKED on asset errors and one exited 139, and the passing cooks used the software Lavapipe device, so this says nothing about the GB10 GPU path, about running without an override shader cache, or about long-run sensor stability (9.37). The run directories live under gitignored artifacts/, so the counts are only re-checkable on the machine that holds them."
+    },
+    {
+      "id": "lavapipe-override-shader-cache-hash-corrected",
+      "category": "reproducibility",
+      "change": "Correct the recorded SHA256 of OverrideGlobalShaderCache-VULKAN_SM6.bin from 414078ae10cb7ff91d6ffc8718c970bbe62430a32bb4924bbf1bb3e1d67399a3 to 414078ae10cb7ff91d6ffc8718c970bbe62430a32bb4924bbf1bb3a1d67399a3 and record the measured size of 53790984 bytes.",
+      "reason": "The audit is the evidence of record, so a digest that does not reproduce makes the verified-cache claim unverifiable, and this file is a required input of the Lavapipe sensor gate. The two values differ by one hexadecimal character. Whether the earlier entry was a transcription slip or the file was regenerated afterwards cannot be determined, so the correction is stated as per the file on disk rather than as a proven typo.",
+      "paths": [
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "sha256sum artifacts/carla/cooked-client-full/Engine/OverrideGlobalShaderCache-VULKAN_SM6.bin",
+        "No other SM6 cache on disk carries that digest, so the corrected value was not copied from a sibling artifact"
+      ],
+      "boundary": "Only the recorded digest and size change. The cache remains an untracked artifacts/ file, so a fresh clone cannot re-verify it. The companion cooked-client-full/Engine/GlobalShaderCache-VULKAN_SM6.bin, 53757589 bytes with sha256 cc2003758ea421d74930c8c32abc3936d1d6e95b8251b3c5a88d27c5f100717d, is a different file that the full cook produces."
     }
   ]
 }

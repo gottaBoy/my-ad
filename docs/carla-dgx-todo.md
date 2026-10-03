@@ -17,6 +17,7 @@ RGB/LiDAR 有效数据、持续稳定运行及可复现部署。当前未达到�
 | fork provenance（revision/branch/dirty/diff sha256）+ verify | `make carla-fork-provenance` / `-verify` | PASS |
 | fork 工作树增量冻结 + verify | `make carla-fork-delta` / `-verify` | PASS |
 | 干净镜像重建（`.dockerignore`，24m31s，逐字节相同二进制） | `make carla-ue-build` | 已采用 |
+| **渲染 full cook 产出 SM6 global shader cache**（用 Lavapipe ICD 绕开驱动崩溃） | `CARLA_FULL_COOK_RENDERING=1 CARLA_VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.aarch64.json make carla-full-cook` | 2026-09-25：14 次 run 中 6 次 PASS、11 次产出 `cooked/Engine/GlobalShaderCache-VULKAN_SM6.bin`；配方固化在 `probe-arm64-full-cook.sh`（audit 9.94） |
 | 自造日志噪声门控（248 → 8 条 Warning） | CVar `carla.LogMaterialSerialize` / `-CarlaLogMaterialSerialize` | 已实测 |
 | GB10 厂商证据包（39 运行 + 封面）与**数字自校验** | `artifacts/gb10-driver-report/20261003T052318Z/` + `tests/test_carla_gb10_bundle.py` | 封面每个数字从 `report.json` 反推比对 |
 | 决策队列一页 | `docs/carla-handoff.md` | 引用的 `artifacts/` 路径有测试保证存在 |
