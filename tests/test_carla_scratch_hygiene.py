@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -59,10 +60,24 @@ class ScratchHygieneTest(unittest.TestCase):
         )
 
     def test_listing_matches_what_the_manifest_walks(self):
-        # Guard the guard: an empty listing would make the assertion above
-        # vacuous, and the manifest really does see untracked files here.
-        entries = untracked_entries(ROOT)
-        self.assertTrue(any(entry.startswith("scripts/carla/") for entry in entries))
+        # Guard the guard: an empty listing would make the assertion above vacuous. This used to
+        # rely on scripts/carla/ being dirty, which stopped being true once the work was
+        # committed, so the listing is proven on a scratch repository instead: it must see an
+        # untracked file and must not report an ignored one.
+        with tempfile.TemporaryDirectory() as tmp:
+            scratch = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(scratch)], check=True)
+            (scratch / ".gitignore").write_text("ignored/\n", encoding="utf-8")
+            (scratch / "kept.txt").write_text("x\n", encoding="utf-8")
+            (scratch / "ignored").mkdir()
+            (scratch / "ignored" / "skip.txt").write_text("x\n", encoding="utf-8")
+            entries = untracked_entries(scratch)
+        self.assertIn("kept.txt", entries)
+        self.assertFalse(any(entry.startswith("ignored/") for entry in entries))
+        # And the real tree is still walkable: whatever it lists must be reproducible.
+        for entry in untracked_entries(ROOT):
+            path = ROOT / entry
+            self.assertFalse(path.is_symlink(), entry)
 
 
 if __name__ == "__main__":
