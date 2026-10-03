@@ -55,10 +55,32 @@
 
 ### 3. fork 改动固化方式 —— 需要你定规则
 
-- 现状：UE 工作树 **92 个 tracked 修改**（83 个无精选补丁）；HEAD 未动、未提交。
-- 已有的：增量已冻结并三处摘要一致（`make carla-fork-delta-verify` PASS）。
-- 要决定的：提交进 fork 分支（并让 `ue-setup` 的「工作树干净」断言恢复），还是维持
-  「冻结增量 + 未提交」。不决定的话，「`g0-probe`/`ue-setup` 的 pin 与现状不符」会一直挂着。
+**实测现状（2026-10-03）**：
+
+| fork | 分支 | remote | 未推送 | 未提交 | 未跟踪 |
+| --- | --- | --- | --- | --- | --- |
+| `third_party/carla` | `dgx-arm64` | `origin` = `gottaBoy/carla` | **ahead 2** | 1 个 tracked（`DefaultInput.ini`） | 6 |
+| `third_party/unreal-engine` | `dgx-arm64` | `gottaBoy`（另有 `origin` = `CarlaUnreal/UnrealEngine`） | **分支无 upstream（从未推送）** | **92 个 tracked** | 5 |
+
+**建议：提交并推送到 `gottaBoy` 下的分支**，理由是现在「产出二进制的树」的唯一副本是这台机器上的**脏工作树**：
+
+1. manifest / provenance 记的是 fork HEAD **加上未提交 delta 的 sha256**——只拿 HEAD 复现不出构建；
+2. 本轮我已经因为一次误 `git checkout` 丢掉过 46 条 ledger；同样的事故发生在 92 个未提交文件的 UE fork 上，丢的是 ARM64 构建本身；
+3. carla fork 的 `origin` 已经就是 `gottaBoy/carla`，只是那 2 个 commit 没推。
+
+**顺序很重要（会连锁失效）**：
+
+```bash
+# 1) 先分拣未跟踪项（例如 UE 的 Saved_shaderdiag/ 是诊断输出，应进 .gitignore 而不是提交）
+# 2) 两个 fork 各自提交 dgx-arm64
+# 3) 推送：carla → origin；ue → gottaBoy（设 upstream）
+# 4) 再重生成主仓记录（否则 --verify 报 DRIFT）
+m make carla-fork-provenance && make carla-fork-delta
+```
+
+第 4 步不能省：提交之后「未提交 delta」变成空，冻结的 `fork-working-tree-delta-*.patch` 与 manifest 的 `tracked_diff_sha256` 都会对不上。
+
+**需要你确认的点**：推送要你的凭据（我这里没有）；`gottaBoy/UnrealEngine` 若是公开仓，请确认 UE 源码的发布方式符合你们对 Epic EULA 的处理（本项目的 `origin` 本来就是公开的 `CarlaUnreal/UnrealEngine`，但这是你的判断）。若决定不推送，现有回退是主仓里冻结的 delta 补丁——但它是 `git diff --binary HEAD` 的文本导出，**不覆盖未跟踪文件**（那部分只在 `artifacts/` 的 manifest 快照里，而它不入库），所以回退比推分支弱。
 
 ## 不依赖上述决定的下一步（可继续推进）
 
