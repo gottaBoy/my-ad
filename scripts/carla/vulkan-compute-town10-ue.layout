@@ -1,0 +1,7 @@
+# Captured from UE FVulkanPipelineStateCacheManager for the first Town10 compute PSO.
+set_count=1
+binding 0 0 uniform_buffer_dynamic 1 compute
+binding 0 1 storage_texel_buffer 1 compute
+push_constants=0
+pipeline_flags=0
+required_subgroup_size=0

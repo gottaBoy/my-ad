@@ -20,6 +20,9 @@ x-carla-common: &carla-common
     - ${CARLA_UE_DIR:-./third_party/unreal-engine}:/workspace/unreal-engine:ro
     - ${CARLA_ARTIFACT_DIR:-./artifacts/carla}:/artifacts/carla
     - ./scripts:/opt/my-ad/scripts:ro
+    # Opt-in GB10 API-usage diagnostics; populated by
+    # scripts/carla/fetch-vulkan-validation-layer.sh and unused by product runs.
+    - ${CARLA_VALIDATION_LAYER_DIR:-./data/cache/vulkan-validation-layer}:/opt/vulkan-validation-layer:ro
   restart: "no"
 
 services:

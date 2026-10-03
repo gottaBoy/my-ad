@@ -36,7 +36,7 @@ import uuid
 
 sys.dont_write_bytecode = True
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_ARTIFACT_RELATIVE = Path("artifacts/carla/build-manifests")
 ROOT_NAMES = ("project", "carla", "ue")
 REPOSITORY_NAMES = {"project": "PROJECT", "carla": "CARLA", "ue": "UE"}
@@ -499,6 +499,21 @@ def _environment():
     return {"values": values, "redacted_keys": redacted}
 
 
+def _toolchain_image():
+    """Which toolchain image the capture ran in, as declared by the caller.
+
+    This script runs inside the container, so it cannot ask Docker what image it
+    is. The caller supplies both the reference and the resolved image ID, because
+    a tag is mutable: on 2026-10-02 the image in use was eleven days older than
+    its Dockerfile and nothing in a manifest could have shown that. Empty values
+    mean the caller declared no image, which is recorded rather than inferred.
+    """
+    return {
+        "reference": os.environ.get("CARLA_TOOLCHAIN_IMAGE", "").strip(),
+        "id": os.environ.get("CARLA_TOOLCHAIN_IMAGE_ID", "").strip(),
+    }
+
+
 def _artifact_paths(project_root, artifact_root):
     artifact_root = Path(artifact_root).expanduser().resolve()
     artifact_root.mkdir(parents=True, exist_ok=True)
@@ -534,6 +549,7 @@ def _manifest_template(project_root, carla_root, ue_root, runtime, command):
         "repositories": {},
         "key_files": [],
         "runtime": runtime,
+        "toolchain_image": _toolchain_image(),
         "command": {"argv": _normalized_command(project_root, command), "cwd": "."},
         "environment": _environment(),
     }
@@ -577,6 +593,7 @@ def capture(project_root, carla_root, ue_root, artifact_root=None, command=None)
                         "identity": "project-root:."},
             "command": {"argv": list(command or [sys.executable, *sys.argv]), "cwd": "."},
             "environment": _environment(),
+            "toolchain_image": _toolchain_image(),
         }
         manifest["status"] = "FAIL"
         manifest.setdefault("errors", []).append(str(error))
@@ -693,6 +710,13 @@ def verify(manifest_path, project_root):
     _require(isinstance(runtime, dict) and runtime.get("host_arch") == "arm64"
              and runtime.get("docker_arch") == "arm64", "manifest runtime gate is not ARM64")
     _require(_runtime_gate() == runtime, "current Docker/ARM64 runtime differs")
+    toolchain = manifest.get("toolchain_image")
+    _require(isinstance(toolchain, dict) and set(toolchain) == {"reference", "id"},
+             "toolchain_image record is invalid")
+    # Only the resolved ID is compared: a tag is a pointer that legitimately moves,
+    # and moving one must not make an honest manifest unverifiable. The reference is
+    # recorded so a reader can see which tag was in play at capture time.
+    _require(toolchain["id"] == _toolchain_image()["id"], "toolchain image changed")
     project = manifest.get("project")
     _require(isinstance(project, dict) and project.get("root") == "."
              and project.get("identity") == "project-root:.", "project identity is invalid")

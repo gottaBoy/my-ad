@@ -20,6 +20,7 @@ RUN apt-get update \
         cmake \
         file \
         flex \
+        gdb \
         git \
         git-lfs \
         gnupg \
@@ -51,6 +52,7 @@ RUN apt-get update \
         unzip \
         wget \
         vulkan-tools \
+        glslang-tools \
     && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \

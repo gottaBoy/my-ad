@@ -310,6 +310,58 @@ class BuildManifestTest(unittest.TestCase):
         self.assertNotIn("MY_ACCESS_TOKEN", data["environment"]["values"])
         self.assertNotIn("UNRELATED_SETTING", data["environment"]["values"])
 
+    def test_declared_toolchain_image_is_recorded_and_verifies(self):
+        declared = {"CARLA_TOOLCHAIN_IMAGE": "my-ad/carla-toolchain:arm64",
+                    "CARLA_TOOLCHAIN_IMAGE_ID": "sha256:" + "a" * 64}
+        with mock.patch.dict(os.environ, declared, clear=False):
+            data = self.capture()
+            self.assertEqual("my-ad/carla-toolchain:arm64",
+                             data["toolchain_image"]["reference"])
+            self.assertEqual("sha256:" + "a" * 64, data["toolchain_image"]["id"])
+            self.assertEqual("PASS",
+                             manifest.verify(self.manifest_path, self.project)["status"])
+
+    def test_rebuilt_toolchain_image_fails_verify(self):
+        # A tag alone cannot pin a toolchain: the image in use was eleven days
+        # older than its Dockerfile, so the resolved ID is what has to match.
+        with mock.patch.dict(os.environ, {
+            "CARLA_TOOLCHAIN_IMAGE": "my-ad/carla-toolchain:arm64",
+            "CARLA_TOOLCHAIN_IMAGE_ID": "sha256:" + "a" * 64,
+        }, clear=False):
+            self.capture()
+            with mock.patch.dict(os.environ,
+                                 {"CARLA_TOOLCHAIN_IMAGE_ID": "sha256:" + "b" * 64},
+                                 clear=False):
+                with self.assertRaises(manifest.ManifestError) as caught:
+                    manifest.verify(self.manifest_path, self.project)
+        self.assertIn("toolchain image changed", str(caught.exception))
+
+    def test_a_retagged_image_still_verifies(self):
+        # Rebuilding retags the default name onto a new image, and the default
+        # name later moves to another tag; neither may invalidate an honest
+        # manifest, because the resolved ID is the identity.
+        with mock.patch.dict(os.environ, {
+            "CARLA_TOOLCHAIN_IMAGE": "my-ad/carla-toolchain:arm64",
+            "CARLA_TOOLCHAIN_IMAGE_ID": "sha256:" + "a" * 64,
+        }, clear=False):
+            self.capture()
+            with mock.patch.dict(os.environ, {
+                "CARLA_TOOLCHAIN_IMAGE": "my-ad/carla-toolchain:arm64-inuse",
+                "CARLA_TOOLCHAIN_IMAGE_ID": "sha256:" + "a" * 64,
+            }, clear=False):
+                self.assertEqual("PASS",
+                                 manifest.verify(self.manifest_path, self.project)["status"])
+
+    def test_undeclared_toolchain_image_is_recorded_as_empty(self):
+        environment = dict(os.environ)
+        for key in ("CARLA_TOOLCHAIN_IMAGE", "CARLA_TOOLCHAIN_IMAGE_ID"):
+            environment.pop(key, None)
+        with mock.patch.dict(os.environ, environment, clear=True):
+            data = self.capture()
+            self.assertEqual({"reference": "", "id": ""}, data["toolchain_image"])
+            self.assertEqual("PASS",
+                             manifest.verify(self.manifest_path, self.project)["status"])
+
     def _write_source_lock(self, carla_commit, ue_commit):
         (self.project / "config/carla/source.lock").write_text(
             "schema: 1\n\nsources:\n"

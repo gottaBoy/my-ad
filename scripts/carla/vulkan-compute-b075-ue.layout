@@ -1,0 +1,12 @@
+# Captured from the failing UE B075 compute create on native GB10.
+set_count=1
+binding 0 0 uniform_buffer_dynamic 1 compute
+binding 0 1 storage_image 1 compute
+binding 0 2 storage_image 1 compute
+binding 0 3 storage_image 1 compute
+binding 0 4 storage_image 1 compute
+binding 0 5 sampled_image 1 compute
+binding 0 6 sampler 1 compute
+push_constants=0
+pipeline_flags=0
+required_subgroup_size=0

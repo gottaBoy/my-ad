@@ -72,6 +72,10 @@ class TbbStaticTest(unittest.TestCase):
 
     def test_arm64_rtti_helper_abi_contract(self):
         directory = ROOT / "artifacts/carla/usd/tbb-rtti-arm64"
+        if not (directory / "task-rtti.cpp").is_file():
+            # The helper is generated into artifacts/, which is gitignored: a fresh clone has no
+            # copy, and this ABI contract can only be checked where the helper was built.
+            self.skipTest("generated ARM64 TBB RTTI helper is not present")
         source = (directory / "task-rtti.cpp").read_text()
         for token in (
             'extern const unsigned char _ZTVN10__cxxabiv117__class_type_infoE[]',

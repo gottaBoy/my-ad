@@ -30,8 +30,51 @@ fi
 ue_dir="${CARLA_UE_DIR:-/workspace/unreal-engine}"
 carla_dir="${CARLA_SOURCE_DIR:-/workspace/carla}"
 artifact_dir="${CARLA_ARTIFACT_DIR:-/artifacts/carla}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${script_dir}/arm64-renderer-scope.sh"
 editor="${CARLA_EDITOR_BINARY:-${ue_dir}/Engine/Binaries/LinuxArm64/UnrealEditor}"
 project="${carla_dir}/Unreal/CarlaUnreal/CarlaUnreal.uproject"
+maps_root="${carla_dir}/Unreal/CarlaUnreal/Content/Carla/Maps"
+game_ini="${carla_dir}/Unreal/CarlaUnreal/Config/DefaultGame.ini"
+[[ -d "${maps_root}" ]] || { echo "CARLA maps directory is missing: ${maps_root}" >&2; exit 2; }
+[[ -f "${game_ini}" ]] || { echo "Project packaging config is missing: ${game_ini}" >&2; exit 2; }
+[[ -d "${maps_root}/OpenDrive" && -d "${maps_root}/Sublevels" ]] || {
+  echo "CARLA OpenDrive or streaming sublevel directory is missing: ${maps_root}" >&2
+  exit 2
+}
+
+# Runtime map set for the coverage assertion: every map that owns a staged CARLA
+# OpenDrive spec, merged with the project's own MapsToCook list.
+map_requests=()
+spec_count=0
+while IFS= read -r -d '' spec; do
+  spec_count=$((spec_count + 1))
+  spec_name="$(basename "${spec}" .xodr)"
+  [[ -f "${maps_root}/${spec_name}.umap" ]] || {
+    echo "OpenDrive spec has no matching runtime map: ${spec}" >&2
+    exit 2
+  }
+  map_requests+=("/Game/Carla/Maps/${spec_name}")
+done < <(find "${maps_root}/OpenDrive" -maxdepth 1 -type f -name '*.xodr' -print0)
+[[ "${spec_count}" -gt 0 ]] || {
+  echo "No OpenDrive specs found in ${maps_root}/OpenDrive" >&2
+  exit 2
+}
+while IFS= read -r ini_map; do
+  [[ -n "${ini_map}" ]] || continue
+  [[ "${ini_map}" == /Game/Carla/Maps/* && \
+    -f "${maps_root}/${ini_map#/Game/Carla/Maps/}.umap" ]] || {
+    echo "MapsToCook entry has no matching CARLA map: ${ini_map}" >&2
+    exit 2
+  }
+  map_requests+=("${ini_map}")
+done < <(sed -nE 's/^\+MapsToCook=\(FilePath="([^"]+)"\).*/\1/p' "${game_ini}")
+mapfile -t cook_maps < <(printf '%s\n' "${map_requests[@]}" | grep -v '^$' | sort -u)
+[[ "${#cook_maps[@]}" -ge 2 ]] || {
+  echo "Derived fewer than two cook map requests; refusing an asset-only cook" >&2
+  exit 2
+}
+
 mkdir -p "${artifact_dir}"
 run_dir="$(mktemp -d "${artifact_dir}/full-cook-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")"
 chmod 0755 "${run_dir}"
@@ -41,8 +84,16 @@ step=preflight
 finish() {
   local code=$? status=BLOCKED
   [[ "${code}" == 0 ]] && status=PASS
-  printf "# ARM64 CarlaUnreal Full Cook\n\n- Status: %s\n- Step: %s\n- Exit code: %s\n- Timeout: %ss\n- Target platform: %s\n- Rendering cook: %s\n- Output: %s\n- Scope: full project cook for one ARM64 runtime target\n- Excluded: server staging, CARLA client RPC, sensors, and traffic/walker gameplay\n" \
-    "${status}" "${step}" "${code}" "${timeout_seconds}" "${target_platform}" "${rendering}" "${output_dir}" \
+  # Report the coverage that was actually asserted, so a narrower scope can never be
+  # read back as a full project cook.
+  local cooked_maps=0 cooked_sublevels=0
+  if [[ -s "${run_dir}/cooked-maps.txt" ]]; then
+    cooked_maps="$(wc -l < "${run_dir}/cooked-maps.txt")"
+    cooked_sublevels="$(grep -ac '^Sublevels/' "${run_dir}/cooked-maps.txt" || true)"
+  fi
+  printf "# ARM64 CarlaUnreal Full Cook\n\n- Status: %s\n- Step: %s\n- Exit code: %s\n- Timeout: %ss\n- Target platform: %s\n- Rendering cook: %s\n- Output: %s\n- Scope: project-wide -cookall for one ARM64 runtime target; %s map requests, %s cooked .umap of which %s streaming sublevels; every Carla sensor material asserted present\n- Excluded: server staging, CARLA client RPC, sensors, and traffic/walker gameplay\n" \
+    "${status}" "${step}" "${code}" "${timeout_seconds}" "${target_platform}" "${rendering}" \
+    "${output_dir}" "${#cook_maps[@]}" "${cooked_maps}" "${cooked_sublevels}" \
     > "${run_dir}/decision.md"
   printf "%s full-cook artifacts=%s step=%s exit=%s\n" \
     "${status}" "${run_dir}" "${step}" "${code}"
@@ -57,7 +108,6 @@ command=(
   "${project}"
   -run=Cook
   -targetplatform="${target_platform}"
-  -COOKDIR="${carla_dir}/Unreal/CarlaUnreal/Content/Carla"
   -outputdir="${output_dir}"
   -SkipZenStore
   -nosound
@@ -71,7 +121,16 @@ command=(
   -ddc=NoZenLocalFallback
   -NoAssetRegistryCacheWrite
   -NoP4
+  -cookall
 )
+# A -COOKDIR walk only enumerates *.uasset (UCookOnTheFlyServer::CollectFilesToCook calls
+# FindFilesRecursive with FPackageName::GetAssetPackageExtension), so it silently drops
+# every *.umap and all plugin content, including the Carla/PostProcessingMaterials sensor
+# materials. -cookall is the real project-wide scope; the runtime maps are still requested
+# explicitly so a dropped map fails the gate instead of the staged client.
+for cook_map in "${cook_maps[@]}"; do
+  command+=(-MAP="${cook_map}")
+done
 [[ -z "${vk_icd_filenames}" ]] || export VK_ICD_FILENAMES="${vk_icd_filenames}"
 if [[ "${rendering}" == 0 ]]; then
   command+=(-nullrhi)
@@ -85,14 +144,15 @@ else
     -ini:Engine:[SF_VULKAN_SM6]:BindlessResources=Disabled
     -ini:Engine:[SF_VULKAN_SM6]:BindlessSamplers=Disabled
     -ini:Engine:[/Script/LinuxTargetPlatform.LinuxTargetSettings]:bEnableRayTracing=False
-    -ini:Engine:[SystemSettings]:r.RayTracing=0
-    -ini:Engine:[SystemSettings]:r.RayTracing.EnableOnDemand=0
-    -ini:Engine:[SystemSettings]:r.Lumen.DiffuseIndirect.Allow=0
-    -ini:Engine:[SystemSettings]:r.Shadow.Virtual.Enable=0
-    -ini:Engine:[SystemSettings]:r.VolumetricCloud=0
-    -ini:Engine:[SystemSettings]:r.VirtualTextures=0
   )
+  # Cook-time and run-time shader scope come from one shared list. r.VirtualTextures and
+  # r.RayTracing are ECVF_ReadOnly, so a permutation the cook leaves out cannot be
+  # switched back on by the cooked client: it aborts in FMaterial::GetShaderMap instead.
+  while IFS= read -r renderer_flag; do
+    command+=("${renderer_flag}")
+  done < <(carla_renderer_systemsettings_flags)
 fi
+printf '%s\n' "${cook_maps[@]}" > "${run_dir}/cook-maps.txt"
 printf "%q " "${command[@]}" > "${run_dir}/command.txt"
 printf "\n" >> "${run_dir}/command.txt"
 printf "%s\n" "${target_platform}" > "${run_dir}/target-platform.txt"
@@ -158,8 +218,8 @@ fi
 find "${output_dir}" -type f -printf "%P %s\n" | sort > "${run_dir}/output-files.txt"
 du -sb "${output_dir}" | awk '{print $1}' > "${run_dir}/output-bytes.txt"
 
-# COOKDIR is a filesystem path. A package path such as /Game/Carla is silently
-# ignored by recursive enumeration and under-cooks the client.
+# Sentinels for the project Content/Carla asset tree. A package path such as
+# /Game/Carla is silently ignored by recursive enumeration and under-cooks the client.
 expected_packages=(
   "Static/Dynamic/00_LegacyAssets/PedestrianProps/SM_PlasticBag.uasset"
   "Static/Static/00_LegacyAssets/SM_StreetAD01.uasset"
@@ -173,6 +233,72 @@ for package_suffix in "${expected_packages[@]}"; do
   }
 done
 
+# Runtime content coverage. A cook that silently drops maps or sensor materials is not
+# a full client cook: the staged client then dies in CARLA world setup ("has no SM
+# assigned to the ISM") or in the sensor material path.
+cooked_map_count=0
+for cook_map in "${cook_maps[@]}"; do
+  map_relative="${cook_map#/Game/Carla/Maps/}"
+  cooked_map="${output_dir}/CarlaUnreal/Content/Carla/Maps/${map_relative}.umap"
+  [[ -f "${cooked_map}" ]] || {
+    echo "Requested map was not cooked: ${cooked_map}" >&2
+    exit 3
+  }
+  cooked_map_count=$((cooked_map_count + 1))
+done
+[[ "${cooked_map_count}" -ge 2 ]] || {
+  echo "Cooked map coverage is too narrow: ${cooked_map_count}" >&2
+  exit 3
+}
+find "${output_dir}/CarlaUnreal/Content/Carla/Maps" -type f -name '*.umap' -printf '%P\n' \
+  | sort > "${run_dir}/cooked-maps.txt"
+
+# Every streaming sublevel the runtime maps load must be cooked.
+missing_sublevels=0
+source_sublevels=0
+while IFS= read -r -d '' source_sublevel; do
+  source_sublevels=$((source_sublevels + 1))
+  relative="${source_sublevel#"${maps_root}/"}"
+  [[ -f "${output_dir}/CarlaUnreal/Content/Carla/Maps/${relative}" ]] || {
+    echo "Streaming sublevel was not cooked: ${relative}" >&2
+    missing_sublevels=$((missing_sublevels + 1))
+  }
+done < <(find "${maps_root}/Sublevels" -type f -name '*.umap' -print0)
+[[ "${source_sublevels}" -gt 0 ]] || {
+  echo "No CARLA streaming sublevel maps found in ${maps_root}/Sublevels" >&2
+  exit 3
+}
+[[ "${missing_sublevels}" -eq 0 ]] || {
+  echo "${missing_sublevels} streaming sublevel map(s) missing from the cook" >&2
+  exit 3
+}
+
+# Carla plugin sensor materials live outside Content/Carla and are invisible to a
+# project-content directory walk.
+sensor_materials="${carla_dir}/Unreal/CarlaUnreal/Plugins/Carla/Content/PostProcessingMaterials"
+[[ -d "${sensor_materials}" ]] || {
+  echo "CARLA sensor material directory is missing: ${sensor_materials}" >&2
+  exit 2
+}
+missing_materials=0
+source_materials=0
+while IFS= read -r -d '' source_material; do
+  source_materials=$((source_materials + 1))
+  relative="${source_material#"${sensor_materials}/"}"
+  [[ -f "${output_dir}/CarlaUnreal/Plugins/Carla/Content/PostProcessingMaterials/${relative}" ]] || {
+    echo "Sensor material was not cooked: ${relative}" >&2
+    missing_materials=$((missing_materials + 1))
+  }
+done < <(find "${sensor_materials}" -type f -name '*.uasset' -print0)
+[[ "${source_materials}" -gt 0 ]] || {
+  echo "No CARLA sensor materials found in ${sensor_materials}" >&2
+  exit 3
+}
+[[ "${missing_materials}" -eq 0 ]] || {
+  echo "${missing_materials} CARLA sensor material(s) missing from the cook" >&2
+  exit 3
+}
+
 step=complete
 
-echo "Runtime Cook scope: ${carla_dir}/Unreal/CarlaUnreal/Content/Carla; project-declared exclusions: /CarlaTools,/Game/Carla/HoudiniEngine"
+echo "Runtime Cook scope: whole project (-cookall) plus ${#cook_maps[@]} explicit map requests; project-declared exclusions: /CarlaTools,/Game/Carla/HoudiniEngine"

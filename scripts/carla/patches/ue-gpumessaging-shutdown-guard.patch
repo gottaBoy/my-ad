@@ -1,0 +1,43 @@
+--- a/Engine/Source/Runtime/RenderCore/Private/GPUMessaging.cpp
++++ b/Engine/Source/Runtime/RenderCore/Private/GPUMessaging.cpp
+@@ -47,8 +47,20 @@
+ 
+ class FSystem : public FRenderResource
+ {
+ public:
++	~FSystem()
++	{
++		// Runs before MessageHandlers is destroyed, which is what a socket needs to know:
++		// a renderer resource that owns a GPUMessage::FSocket (Nanite::FGlobalResources'
++		// feedback manager, for one) can be released after this global at process exit,
++		// and its ~FSocket would otherwise unregister against a destroyed map.
++		bIsBeingDestroyed = true;
++	}
++
++	// Set by ~FSystem before its members are destroyed.
++	static bool bIsBeingDestroyed;
++
+ 	// Need to guard access because it may happen during FScene initialization (Game Thread) while another scene is being rendered.
+ 	FCriticalSection AccessCS;
+ 
+ 
+@@ -262,13 +274,18 @@
+ 
+ 	uint32 NextMessageId = 0;
+ };
+ 
++bool FSystem::bIsBeingDestroyed = false;
++
+ static TGlobalResource<FSystem> GSystem;
+ 
+ void FSocket::Reset()
+ {
+-	if (MessageId.IsValid())
++	// GSystem can be destroyed before the last sockets at process exit: the handler map
++	// and its lock are gone by then, and the registration dies with the map, so
++	// unregistering is not only unsafe but unnecessary.
++	if (MessageId.IsValid() && !FSystem::bIsBeingDestroyed)
+ 	{
+ 		GSystem.RemoveHandler(MessageId);
+ 	}
+ 

@@ -4,13 +4,19 @@ umask 022
 
 client_root="${CARLA_COOKED_CLIENT_ROOT:-/artifacts/carla/cooked-client-full/CarlaUnreal}"
 client_binary="${CARLA_COOKED_CLIENT_BINARY:-${client_root}/Binaries/LinuxArm64/CarlaUnreal}"
-client_map="${CARLA_COOKED_CLIENT_MAP:-/Game/Carla/Maps/Town10HD_Opt}"
+# Town01_Opt carries the passing RGB/LiDAR, Traffic Manager and walker evidence. On
+# Town10HD_Opt the cooked client exits ~0.5s after "New episode ... started": the probe
+# completes the version handshake and then fails in get_world(), reproduced on both the
+# under-cooked and the full-cook client. Override CARLA_COOKED_CLIENT_MAP to retest it.
+client_map="${CARLA_COOKED_CLIENT_MAP:-/Game/Carla/Maps/Town01_Opt}"
 rpc_port="${CARLA_RUNTIME_PORT:-2000}"
 ticks="${CARLA_RUNTIME_TICKS:-20}"
 timeout_seconds="${CARLA_RUNTIME_TIMEOUT:-30}"
 total_timeout="${CARLA_RUNTIME_TOTAL_TIMEOUT:-900}"
 startup_timeout="${CARLA_CLIENT_STARTUP_TIMEOUT:-60}"
+apt_timeout="${CARLA_LAVAPIPE_APT_TIMEOUT:-180}"
 mode="${CARLA_RUNTIME_MODE:-sensors}"
+render_profile="${CARLA_LAVAPIPE_RENDER_PROFILE:-default}"
 container_image="${CARLA_LAVAPIPE_IMAGE:-ubuntu:24.04}"
 container_name="carla-lavapipe-gate-$$"
 build_container="${CARLA_BUILD_CONTAINER:-carla-build-session}"
@@ -18,6 +24,8 @@ provenance="${CARLA_RUNTIME_PROVENANCE:-/artifacts/carla/cooked-server-full/runt
 wheel="${CARLA_RUNTIME_WHEEL:-/artifacts/carla/cmake-arm64/PythonAPI/dist/carla-0.10.0-cp310-cp310-linux_aarch64.whl}"
 vk_icd="/usr/share/vulkan/icd.d/lvp_icd.json"
 artifact_dir="${CARLA_ARTIFACT_DIR:-/artifacts/carla}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${script_dir}/arm64-renderer-scope.sh"
 [[ "${artifact_dir}" == /artifacts/carla ]] || {
   echo "CARLA_ARTIFACT_DIR must remain /artifacts/carla for the build-container probe" >&2
   exit 64
@@ -26,18 +34,22 @@ artifact_dir="${CARLA_ARTIFACT_DIR:-/artifacts/carla}"
 # Run on the DGX Spark host. The build container owns the shared CARLA artifacts
 # and executes the Python client; the separate container supplies Lavapipe.
 
-for value in "${rpc_port}" "${ticks}" "${timeout_seconds}" "${total_timeout}" "${startup_timeout}"; do
+for value in "${rpc_port}" "${ticks}" "${timeout_seconds}" "${total_timeout}" "${startup_timeout}" "${apt_timeout}"; do
   [[ "${value}" =~ ^[1-9][0-9]*$ ]] || {
     echo "Runtime limits must be positive integers" >&2
     exit 64
   }
 done
-(( rpc_port <= 65535 && ticks <= 10000 && timeout_seconds <= 120 && startup_timeout <= 600 )) || {
+(( rpc_port <= 65535 && ticks <= 10000 && timeout_seconds <= 120 && startup_timeout <= 600 && apt_timeout <= 600 )) || {
   echo "Runtime limits are out of range" >&2
   exit 64
 }
 [[ "${mode}" == rpc || "${mode}" == sensors || "${mode}" == actors ]] || {
   echo "This wrapper only supports CARLA_RUNTIME_MODE=rpc, sensors or actors" >&2
+  exit 64
+}
+[[ "${render_profile}" == default || "${render_profile}" == no-pso ]] || {
+  echo "CARLA_LAVAPIPE_RENDER_PROFILE must be default or no-pso" >&2
   exit 64
 }
 
@@ -71,6 +83,27 @@ docker exec "${build_container}" chmod 0755 "${run_dir}"
 server_log="${run_dir}/server.log"
 cleanup_started=0
 
+write_server_diagnostics() {
+  local diagnostics_file="${run_dir}/server-diagnostics.txt"
+  {
+    printf "# Lavapipe client/server diagnostics\n"
+    printf "# Source log: %s\n" "${server_log}"
+    for pattern in \
+      "Couldn't find file for package" \
+      "Found 0 dependent packages" \
+      "Ensure condition failed" \
+      "Expected source texture to be in VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL" \
+      "has no SM assigned to the ISM" \
+      "Fatal error!" \
+      "Unhandled Exception:" \
+      "SIGSEGV" \
+      "RequestExitWithStatus"; do
+      printf "\n## %s\n" "${pattern}"
+      docker exec "${build_container}" grep -aFn "${pattern}" "${server_log}" || true
+    done
+  } | docker exec -i "${build_container}" sh -c 'cat > "$0"' "${diagnostics_file}"
+}
+
 cleanup() {
   local code=$?
   (( cleanup_started++ )) || true
@@ -84,6 +117,7 @@ cleanup() {
     pid="$(docker exec "${container_name}" pgrep -n CarlaUnreal 2>/dev/null || true)"
     [[ -z "${pid}" ]] || docker exec "${container_name}" kill -KILL "${pid}" >/dev/null 2>&1 || true
   fi
+  write_server_diagnostics
   docker rm -f "${container_name}" >/dev/null 2>&1 || true
   exit "${code}"
 }
@@ -100,7 +134,9 @@ docker exec "${build_container}" sh -c \
   "timeout_seconds=${timeout_seconds}" \
   "total_timeout=${total_timeout}" \
   "startup_timeout=${startup_timeout}" \
+  "apt_timeout=${apt_timeout}" \
   "mode=${mode}" \
+  "render_profile=${render_profile}" \
   "container_image=${container_image}" \
   "build_container=${build_container}" \
   "provenance=${provenance}" \
@@ -129,8 +165,10 @@ docker exec "${build_container}" sh -c 'printf "%s\n" "$1" > "$0"' \
   "${run_dir}/container-ip.txt" "${container_ip}"
 
 if ! docker exec "${container_name}" test -f "${vk_icd}"; then
-  docker exec "${container_name}" apt-get update -qq
-  docker exec "${container_name}" apt-get install -y --no-install-recommends \
+  timeout --signal=TERM --kill-after=10 "${apt_timeout}" \
+    docker exec "${container_name}" apt-get update -qq
+  timeout --signal=TERM --kill-after=10 "${apt_timeout}" \
+    docker exec "${container_name}" apt-get install -y --no-install-recommends \
     mesa-vulkan-drivers procps
 fi
 docker exec "${container_name}" test -f "${vk_icd}"
@@ -160,14 +198,36 @@ client_command=(
   -ini:Engine:[/Script/Engine.RendererSettings]:r.Lumen.TraceMeshSDFs=0
   -ini:Engine:[/Script/Engine.RendererSettings]:r.AllowOcclusionQueries=0
 )
+# Same shared scope the cook used. The cooked client has no shader permutations for the
+# features in that list, and r.VirtualTextures/r.RayTracing are ECVF_ReadOnly, so leaving
+# them enabled here aborts in FMaterial::GetShaderMap after map load.
+while IFS= read -r renderer_flag; do
+  client_command+=("${renderer_flag}")
+done < <(carla_renderer_systemsettings_flags)
+if [[ "${render_profile}" == no-pso ]]; then
+  # Town10 can spend more than the default render-thread watchdog budget compiling
+  # Lavapipe PSOs after episode start. This is an explicit diagnostic profile; the
+  # default path remains unchanged until the effect is verified.
+  client_command+=(
+    -ini:Engine:[SystemSettings]:r.PSOPrecaching=0
+    -ini:Engine:[SystemSettings]:r.Vulkan.AllowPSOPrecaching=0
+    -ini:Engine:[SystemSettings]:r.AsyncPipelineCompile=0
+    -ini:Engine:[SystemSettings]:r.Vulkan.RHIThread=0
+    -ini:Engine:[ConsoleVariables]:g.TimeoutForBlockOnRenderFence=300000
+  )
+fi
 client_command_json="$(mktemp /tmp/carla-client-command.XXXXXX)"
 export CARLA_CLIENT_COMMAND_JSON="${client_command_json}"
-python3 - <<PY
-import os
+# Pass the array through argv. An @Q expansion without a subscript yields element 0
+# only, so every previously archived client-command.json recorded just ["timeout"]
+# instead of the launch arguments that actually produced the evidence.
+python3 - "${client_command[@]}" <<'PY'
 import json
+import os
+import sys
 path = os.environ["CARLA_CLIENT_COMMAND_JSON"]
 with open(path, "w") as output:
-    print(json.dumps(${client_command@Q}), file=output)
+    print(json.dumps(sys.argv[1:]), file=output)
 PY
 docker exec -i "${build_container}" sh -c 'cat > "$0"' \
   "${run_dir}/client-command.json" < "${client_command_json}"

@@ -1,0 +1,31 @@
+# The images built from this repository take only a few files from the build
+# context: scripts/carla/g0-probe.sh (installed as the carla-g0-probe health
+# check in the CARLA toolchain image) and scripts/dataset-converter/convert.py
+# (the entrypoint of the dataset converter). Everything else in those images
+# comes from apt, the LLVM apt repository, an upstream release tarball, a pip
+# install, a base image stage or the dotnet SDK stage.
+#
+# Without this file the context is the whole working tree. On the DGX that tree
+# is about 966 GB (artifacts, data/models and engines, third_party engine
+# checkouts), so `docker build` cannot even start and the image silently goes
+# stale: the toolchain image in use was built 2026-09-14 while the Dockerfile had
+# already moved on by 2026-09-25. Denying everything and re-allowing only what a
+# Dockerfile reads keeps the context at a few megabytes and makes a clean rebuild
+# possible again. tests/test_carla_image_context.py enforces the invariant that
+# every context input of every Dockerfile stays included.
+# See docs/carla-dgx-audit.md 9.88.
+*
+!scripts
+!scripts/carla
+!scripts/carla/g0-probe.sh
+!scripts/dataset-converter
+!scripts/dataset-converter/convert.py
+!images
+!images/carla-arm64
+!images/carla-arm64/Dockerfile
+!images/dataset-converter
+!images/dataset-converter/Dockerfile
+!images/navsim
+!images/navsim/Dockerfile
+!images/ros-tools
+!images/ros-tools/Dockerfile

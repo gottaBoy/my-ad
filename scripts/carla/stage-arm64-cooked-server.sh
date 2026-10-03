@@ -7,6 +7,7 @@ stage_root="${CARLA_COOKED_SERVER_STAGE:-/artifacts/carla/cooked-server-full/Car
 ue_dir="${CARLA_UE_DIR:-/workspace/unreal-engine}"
 carla_dir="${CARLA_SOURCE_DIR:-/workspace/carla}"
 artifact_dir="${CARLA_ARTIFACT_DIR:-/artifacts/carla}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ ! -f /.dockerenv || "$(uname -m)" != aarch64 ]]; then
   echo "Run this script in the native ARM64 carla-build container" >&2
   exit 2
@@ -50,6 +51,7 @@ mkdir -p "${stage_root}/Content/Carla/Config" \
   "${stage_root}/Content/Carla/Maps/OpenDrive" "${stage_root}/Content/Carla/Maps/Nav"
 cp -a "${carla_dir}/Unreal/CarlaUnreal/Content/Carla/Config/." \
   "${stage_root}/Content/Carla/Config/"
+python3 "${script_dir}/normalize-runtime-config.py" --stage-root "${stage_root}"
 find "${carla_dir}/Unreal/CarlaUnreal/Content/Carla/Maps/OpenDrive" \
   -maxdepth 1 -type f -name '*.xodr' -exec cp -a {} "${stage_root}/Content/Carla/Maps/OpenDrive/" \;
 find "${carla_dir}/Unreal/CarlaUnreal/Content/Carla/Maps/Nav" \

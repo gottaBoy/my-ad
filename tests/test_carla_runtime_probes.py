@@ -307,7 +307,7 @@ class CarlaRuntimeProbeTest(unittest.TestCase):
         for argument in (
             "-run=Cook",
             "-targetplatform=\"${target_platform}\"",
-            '-COOKDIR="${carla_dir}/Unreal/CarlaUnreal/Content/Carla"',
+            "-cookall",
             "-outputdir=\"${output_dir}\"",
             "-ddpi:LinuxArm64:bIsEnabled=true",
             "-SkipZenStore",
@@ -316,6 +316,9 @@ class CarlaRuntimeProbeTest(unittest.TestCase):
             "-NoP4",
         ):
             self.assertIn(argument, script)
+        # A -COOKDIR walk only enumerates *.uasset: it silently drops every *.umap and
+        # all plugin content, so the probe must not go back to that scope.
+        self.assertNotIn("-COOKDIR=", script)
         self.assertIn("Loaded TargetPlatform '${target_platform}'", script)
         self.assertIn("Building Assets For ${target_platform}", script)
         self.assertIn("Cook by the book total time in tick", script)
@@ -325,11 +328,53 @@ class CarlaRuntimeProbeTest(unittest.TestCase):
         self.assertIn("CARLA_FULL_COOK_RENDERING", script)
         self.assertIn("CARLA_VK_ICD_FILENAMES is required when CARLA_FULL_COOK_RENDERING=1", script)
         self.assertIn("-AllowCommandletRendering", script)
-        self.assertIn("-ini:Engine:[SystemSettings]:r.VirtualTextures=0", script)
+        # Cook-time shader scope comes from the shared ARM64 scope file, never an
+        # inline list that the runtime wrapper can drift away from.
+        self.assertIn('source "${script_dir}/arm64-renderer-scope.sh"', script)
+        self.assertIn("carla_renderer_systemsettings_flags", script)
+        self.assertNotIn("-ini:Engine:[SystemSettings]:r.VirtualTextures=0\n  )", script)
         self.assertIn("output-files.txt", script)
         self.assertIn("Expected cooked CARLA package is missing", script)
         for package_name in ("SM_PlasticBag", "SM_StreetAD01", "SM_calibration"):
             self.assertIn(package_name, script)
+
+        # -COOKDIR only enumerates *.uasset, so *.umap files must be requested explicitly
+        # and the gate must reject a cook that silently drops them.
+        for contract in (
+            'map_requests+=("/Game/Carla/Maps/${spec_name}")',
+            '-MAP="${cook_map}"',
+            'find "${maps_root}/OpenDrive"',
+            "+MapsToCook=",
+            "cook-maps.txt",
+            "Requested map was not cooked",
+            "Streaming sublevel was not cooked",
+            "Sensor material was not cooked",
+            "refusing an asset-only cook",
+            "OpenDrive spec has no matching runtime map",
+            "No OpenDrive specs found",
+            "MapsToCook entry has no matching CARLA map",
+            "No CARLA streaming sublevel maps found",
+            "No CARLA sensor materials found",
+        ):
+            self.assertIn(contract, script)
+        maps_dir = REPO_ROOT / "third_party/carla/Unreal/CarlaUnreal/Content/Carla/Maps"
+        for runtime_map in (
+            "Town01_Opt", "Town02_Opt", "Town03_Opt", "Town04_Opt",
+            "Town05_Opt", "Town06_Opt", "Town07_Opt", "Town10HD_Opt", "Town_C",
+        ):
+            self.assertTrue(
+                (maps_dir / f"{runtime_map}.umap").is_file(),
+                f"runtime map source is missing: {runtime_map}.umap",
+            )
+            self.assertTrue(
+                (maps_dir / "OpenDrive" / f"{runtime_map}.xodr").is_file(),
+                f"runtime map OpenDrive spec is missing: {runtime_map}.xodr",
+            )
+        sublevel_maps = sorted(
+            path.relative_to(maps_dir).as_posix()
+            for path in (maps_dir / "Sublevels").rglob("*.umap")
+        )
+        self.assertTrue(sublevel_maps, "CARLA streaming sublevel maps are missing")
 
         project = (REPO_ROOT / "third_party/carla/Unreal/CarlaUnreal/Config/DefaultGame.ini").read_text()
         self.assertIn('+DirectoriesToNeverCook=(Path="/CarlaTools")', project)
@@ -338,6 +383,8 @@ class CarlaRuntimeProbeTest(unittest.TestCase):
     def test_rendering_cook_image_contains_lavapipe_driver(self):
         dockerfile = (REPO_ROOT / "images/carla-arm64/Dockerfile").read_text()
         self.assertIn("mesa-vulkan-drivers", dockerfile)
+        self.assertIn("glslang-tools", dockerfile)
+        self.assertIn("gdb", dockerfile)
 
     def test_cooked_server_stage_carries_runtime_content(self):
         result = subprocess.run(
@@ -355,6 +402,7 @@ class CarlaRuntimeProbeTest(unittest.TestCase):
             "CarlaUnrealServer",
             "CarlaUnreal.uproject",
             "AssetRegistry.bin",
+            "normalize-runtime-config.py",
             "Content/Carla/Config/.",
             "Internationalization",
             "TessellationTable.bin",
@@ -384,6 +432,7 @@ class CarlaRuntimeProbeTest(unittest.TestCase):
             "CarlaUnreal",
             "CarlaUnreal.uproject",
             "AssetRegistry.bin",
+            "normalize-runtime-config.py",
             "OverrideGlobalShaderCache-VULKAN_SM6.bin",
             "Internationalization",
             "Engine/Content/Slate",
@@ -401,6 +450,83 @@ class CarlaRuntimeProbeTest(unittest.TestCase):
         ):
             self.assertIn(required, script)
 
+    def test_runtime_config_alias_is_structurally_normalized(self):
+        helper = REPO_ROOT / "scripts/carla/normalize-runtime-config.py"
+        helper_text = helper.read_text()
+        self.assertIn("json.loads", helper_text)
+        self.assertIn("json.dumps", helper_text)
+        self.assertIn("SM_DebrisContainer.SM_DebrisContainer", helper_text)
+        with tempfile.TemporaryDirectory() as directory:
+            stage_root = Path(directory)
+            asset = stage_root / (
+                "Content/Carla/Static/Dynamic/Construction/"
+                "SM_DebrisContainer.uasset"
+            )
+            config_root = stage_root / "Content/Carla/Config"
+            asset.parent.mkdir(parents=True)
+            config_root.mkdir(parents=True)
+            asset.write_bytes(b"cooked")
+            old = (
+                "/Game/Carla/Static/Dynamic/Construction/"
+                "Sm_ConstructionDebrie.Sm_ConstructionDebrie"
+            )
+            new = (
+                "/Game/Carla/Static/Dynamic/Construction/"
+                "SM_DebrisContainer.SM_DebrisContainer"
+            )
+            for name in ("PropParameters.json", "Default.Package.json"):
+                (config_root / name).write_text(
+                    json.dumps({"mesh": old, "nested": [{"path": old}]})
+                )
+            result = subprocess.run(
+                ["python3", str(helper), "--stage-root", str(stage_root)],
+                capture_output=True, text=True, check=True,
+            )
+            self.assertIn("references=4", result.stdout)
+            for name in ("PropParameters.json", "Default.Package.json"):
+                content = json.loads((config_root / name).read_text())
+                self.assertEqual(new, content["mesh"])
+                self.assertEqual(new, content["nested"][0]["path"])
+            result = subprocess.run(
+                ["python3", str(helper), "--stage-root", str(stage_root)],
+                capture_output=True, text=True, check=True,
+            )
+            self.assertIn("references=0", result.stdout)
+
+    def test_runtime_config_alias_rejects_bad_inputs_without_partial_rewrite(self):
+        helper = REPO_ROOT / "scripts/carla/normalize-runtime-config.py"
+        with tempfile.TemporaryDirectory() as directory:
+            stage_root = Path(directory)
+            config_root = stage_root / "Content/Carla/Config"
+            config_root.mkdir(parents=True)
+            old = (
+                "/Game/Carla/Static/Dynamic/Construction/"
+                "Sm_ConstructionDebrie.Sm_ConstructionDebrie"
+            )
+            first = config_root / "PropParameters.json"
+            second = config_root / "Default.Package.json"
+            first.write_text(json.dumps({"mesh": old, "note": f"prefix:{old}"}))
+            second.write_text("{invalid")
+            command = ["python3", str(helper), "--stage-root", str(stage_root)]
+            missing_asset = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(0, missing_asset.returncode)
+            self.assertIn("replacement cooked asset is missing", missing_asset.stderr)
+
+            asset = stage_root / (
+                "Content/Carla/Static/Dynamic/Construction/"
+                "SM_DebrisContainer.uasset"
+            )
+            asset.parent.mkdir(parents=True)
+            asset.write_bytes(b"cooked")
+            bad_json = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(0, bad_json.returncode)
+            self.assertEqual(old, json.loads(first.read_text())["mesh"])
+            self.assertEqual("{invalid", second.read_text())
+
+            second.write_text(json.dumps({"mesh": old}))
+            subprocess.run(command, capture_output=True, text=True, check=True)
+            self.assertEqual(f"prefix:{old}", json.loads(first.read_text())["note"])
+
     def test_lavapipe_sensor_gate_is_reproducible(self):
         result = subprocess.run(
             ["make", "-n", "carla-lavapipe-sensors"],
@@ -412,8 +538,16 @@ class CarlaRuntimeProbeTest(unittest.TestCase):
         ).read_text()
         self.assertIn("Run on the DGX Spark host", script)
         self.assertIn("CARLA_COOKED_CLIENT_ROOT:-/artifacts/carla/cooked-client-full/CarlaUnreal", script)
-        self.assertIn("CARLA_COOKED_CLIENT_MAP:-/Game/Carla/Maps/Town10HD_Opt", script)
+        # The default must be the map that actually passes: Town10HD_Opt kills the
+        # cooked client right after episode start, so it is not a usable default.
+        self.assertIn("CARLA_COOKED_CLIENT_MAP:-/Game/Carla/Maps/Town01_Opt", script)
+        self.assertNotIn(
+            'client_map="${CARLA_COOKED_CLIENT_MAP:-/Game/Carla/Maps/Town10HD_Opt}"',
+            script,
+        )
         self.assertIn("CARLA_LAVAPIPE_IMAGE:-ubuntu:24.04", script)
+        self.assertIn('apt_timeout="${CARLA_LAVAPIPE_APT_TIMEOUT:-180}"', script)
+        self.assertIn('timeout --signal=TERM --kill-after=10 "${apt_timeout}"', script)
         self.assertIn('docker inspect "${build_container}" --format', script)
         self.assertIn('-v "${shared_artifact_host}:/artifacts/carla:rw"', script)
         self.assertNotIn("--volumes-from", script)
@@ -434,9 +568,34 @@ class CarlaRuntimeProbeTest(unittest.TestCase):
         ):
             self.assertIn(cvar, script)
         self.assertNotIn("r.VirtualShadowMaps=0", script)
+        # The client launch must reuse the exact shader scope the cook used.
+        # r.VirtualTextures and r.RayTracing are ECVF_ReadOnly, so a cooked client that
+        # still enables them aborts in FMaterial::GetShaderMap ("Failed to find shader
+        # map for default material DefaultDeferredDecalMaterial").
+        self.assertIn('source "${script_dir}/arm64-renderer-scope.sh"', script)
+        self.assertIn("carla_renderer_systemsettings_flags", script)
+        flags = subprocess.run(
+            ["bash", "-c", 'source "$1"; carla_renderer_systemsettings_flags',
+             "bash", str(REPO_ROOT / "scripts/carla/arm64-renderer-scope.sh")],
+            capture_output=True, text=True, check=True,
+        ).stdout.splitlines()
+        self.assertEqual(6, len(flags))
+        self.assertEqual(len(flags), len(set(flags)))
+        self.assertIn("-ini:Engine:[SystemSettings]:r.VirtualTextures=0", flags)
+        self.assertIn("-ini:Engine:[SystemSettings]:r.RayTracing=0", flags)
         self.assertIn("DeviceName: llvmpipe", script)
         self.assertIn("libvulkan_lvp.so", script)
         self.assertIn('mode="${CARLA_RUNTIME_MODE:-sensors}"', script)
+        self.assertIn('render_profile="${CARLA_LAVAPIPE_RENDER_PROFILE:-default}"', script)
+        self.assertIn('[[ "${render_profile}" == default || "${render_profile}" == no-pso ]]', script)
+        for cvar in (
+            "r.PSOPrecaching=0",
+            "r.Vulkan.AllowPSOPrecaching=0",
+            "r.AsyncPipelineCompile=0",
+            "r.Vulkan.RHIThread=0",
+            "[ConsoleVariables]:g.TimeoutForBlockOnRenderFence=300000",
+        ):
+            self.assertIn(cvar, script)
         self.assertIn('-e CARLA_RUNTIME_MODE="${mode}"', script)
         self.assertIn('mode="${CARLA_RUNTIME_MODE:-sensors}"', script)
         self.assertIn('[[ "${mode}" == rpc || "${mode}" == sensors || "${mode}" == actors ]]', script)
@@ -444,6 +603,11 @@ class CarlaRuntimeProbeTest(unittest.TestCase):
         # form reported gate failures as success.
         self.assertIn('code=0\ndocker exec', script)
         self.assertIn('bash /opt/my-ad/scripts/carla/probe-arm64-runtime.sh || code=$?', script)
+        # ${client_command@Q} without a subscript expands to element 0 only, which made
+        # every archived client-command.json record ["timeout"] instead of the launch
+        # arguments. The array must reach the JSON writer through argv.
+        self.assertNotIn("${client_command@Q}", script)
+        self.assertIn('python3 - "${client_command[@]}"', script)
         self.assertIn("CARLA_ALLOW_WORLD_MUTATION=1", script)
         self.assertIn("runtime-provenance.json", script)
         self.assertIn("carla-0.10.0-cp310-cp310-linux_aarch64.whl", script)
@@ -451,6 +615,16 @@ class CarlaRuntimeProbeTest(unittest.TestCase):
         self.assertIn('docker exec "${build_container}" grep -aFq', script)
         self.assertIn('docker exec "${build_container}" tail -n 80', script)
         self.assertIn('docker exec -i "${build_container}" sh -c \'cat > "$0"\'', script)
+        self.assertIn("server-diagnostics.txt", script)
+        for diagnostic in (
+            "Couldn't find file for package",
+            "Found 0 dependent packages",
+            "Ensure condition failed",
+            "Expected source texture to be in VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL",
+            "has no SM assigned to the ISM",
+            "RequestExitWithStatus",
+        ):
+            self.assertIn(diagnostic, script)
         self.assertIn('docker rm -f "${container_name}"', script)
 
     def test_lavapipe_soak_target_uses_reproducible_defaults(self):
@@ -473,6 +647,156 @@ class CarlaRuntimeProbeTest(unittest.TestCase):
         self.assertIn("CARLA_RUNTIME_TICKS=240", override.stdout)
         self.assertIn("CARLA_RUNTIME_TOTAL_TIMEOUT=300", override.stdout)
 
+    def test_town10_nullrhi_rpc_gate_uses_real_world_readiness(self):
+        result = subprocess.run(
+            ["make", "-n", "carla-town10-nullrhi-rpc"],
+            cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        )
+        self.assertIn("--profile build run --rm -T", result.stdout)
+        self.assertIn("CARLA_NULLRHI_PORT=20200", result.stdout)
+        self.assertIn("CARLA_NULLRHI_TICKS=20", result.stdout)
+        self.assertIn("probe-town10-nullrhi-rpc.sh", result.stdout)
+        script = (REPO_ROOT / "scripts/carla/probe-town10-nullrhi-rpc.sh").read_text()
+        for contract in (
+            "arm64-renderer-scope.sh",
+            "Town10HD_Opt.umap",
+            "Town10HD_Opt.xodr",
+            "Town10HD_Opt.bin",
+            '-carla-rpc-port="${port}"',
+            "-nullrhi -no-rendering",
+            "client.get_world()",
+            'assert world.get_map().name.endswith("Town10HD_Opt")',
+            "check_carla_runtime.py",
+            "--allow-world-mutation",
+            "server-exit-code.txt",
+            "Excluded: RGB/LiDAR",
+            # The stop path must signal the server, not a wrapper: GNU timeout does not
+            # forward a SIGTERM it receives, so signalling it left the server orphaned and
+            # no signal ever reached UE. `exec` is what makes server_pid the server.
+            'exec "${server_command[@]}"',
+            "Shutdown: %s",
+            "CARLA_NULLRHI_STOP_GRACE",
+        ):
+            self.assertIn(contract, script)
+        # A shutdown is classified from the status first, because the log is racy: a crash
+        # truncates it mid-write. UE's own handler requests exit with 128+signal, so a
+        # handled shutdown and an unhandled kill both report 143 and only the log separates
+        # them, while a crash signal is unambiguous.
+        self.assertIn("LogExit: (Preparing to exit|Exiting)", script)
+        self.assertIn("139|134|135|136) shutdown=crashed", script)
+        self.assertNotIn("timeout --signal=INT --kill-after=10 \"${server_timeout}\"", script)
+        invalid = subprocess.run(
+            ["bash", str(REPO_ROOT / "scripts/carla/probe-town10-nullrhi-rpc.sh")],
+            env={**os.environ, "CARLA_NULLRHI_PORT": "65535"},
+            capture_output=True, text=True,
+        )
+        self.assertEqual(64, invalid.returncode)
+        self.assertIn("out of range", invalid.stderr)
+        invalid_startup = subprocess.run(
+            ["bash", str(REPO_ROOT / "scripts/carla/probe-town10-nullrhi-rpc.sh")],
+            env={**os.environ, "CARLA_NULLRHI_STARTUP_TIMEOUT": "invalid"},
+            capture_output=True, text=True,
+        )
+        self.assertEqual(64, invalid_startup.returncode)
+        self.assertIn("must be positive integers", invalid_startup.stderr)
+
+    def test_vulkan_compute_replay_gate_is_explicit(self):
+        result = subprocess.run(
+            ["make", "-n", "carla-vulkan-compute"],
+            cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        )
+        self.assertIn("--profile build run --rm -T", result.stdout)
+        self.assertIn("probe-vulkan-compute-replay.sh", result.stdout)
+        script = (REPO_ROOT / "scripts/carla/probe-vulkan-compute-replay.sh").read_text()
+        for contract in (
+            "vulkan-compute-replay.c",
+            "vulkan-compute-smoke.comp",
+            "spirv_reflect.c",
+            "spirv-val --target-env vulkan1.3",
+            "CARLA_COMPUTE_BACKEND",
+            "CARLA_COMPUTE_MODE",
+            "CARLA_COMPUTE_LAYOUT_FILE",
+            "CARLA_COMPUTE_DEVICE_STATE",
+            "CARLA_COMPUTE_HISTORY_FILE",
+            "captured-device.h",
+            "lvp_icd*.json",
+            "VK_ICD_FILENAMES=",
+        ):
+            self.assertIn(contract, script)
+        replay = (REPO_ROOT / "scripts/carla/vulkan-compute-replay.c").read_text()
+        for contract in (
+            "spvReflectCreateShaderModule",
+            "vkCreateComputePipelines",
+            "vkCmdDispatch",
+            "readback_words",
+            "ue_exact_replay",
+            "layout_source",
+            "--history",
+            "history_pipeline_count",
+        ):
+            self.assertIn(contract, replay)
+        gpu = subprocess.run(
+            ["make", "-n", "carla-vulkan-compute-gpu"],
+            cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        )
+        self.assertIn("--profile gpu run --rm -T", gpu.stdout)
+        self.assertIn("CARLA_COMPUTE_BACKEND=gb10", gpu.stdout)
+        self.assertIn("CARLA_COMPUTE_LAYOUT_FILE=", gpu.stdout)
+        batch_make = subprocess.run(
+            ["make", "-n", "carla-vulkan-compute", "COMPUTE_MODE=create",
+             "COMPUTE_SHADER_DIR=/artifacts/carla/captured/shaders"],
+            cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        )
+        self.assertIn('CARLA_COMPUTE_SHADER_DIR="/artifacts/carla/captured/shaders"',
+                      batch_make.stdout)
+        self.assertIn("batch_vulkan_compute.py", script)
+        self.assertIn("Batch create requires only CARLA_COMPUTE_SHADER_DIR", script)
+
+    def test_ue_vulkan_device_state_probe_is_diagnostic_only(self):
+        result = subprocess.run(
+            ["make", "-n", "carla-ue-vulkan-device-state"],
+            cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        )
+        self.assertIn("--profile build run --rm -T", result.stdout)
+        self.assertIn("probe-ue-vulkan-device-state.sh", result.stdout)
+        script = (REPO_ROOT / "scripts/carla/probe-ue-vulkan-device-state.sh").read_text()
+        gdb = (REPO_ROOT / "scripts/carla/dump-ue-vulkan-device-state.gdb").read_text()
+        capture = (REPO_ROOT / "scripts/carla/gdb_vulkan_device_capture.py").read_text()
+        for contract in (
+            "CARLA_UE_VULKAN_DEVICE_STATE",
+            "device-create.json",
+            "VkDeviceCreateInfo",
+            "vkCreateDevice",
+            "device_extension_count",
+        ):
+            self.assertIn(contract, script + gdb + capture)
+        self.assertIn("--cap-add SYS_PTRACE", result.stdout)
+        # `docker compose run` has no --security-opt in compose v5, so passing it made this
+        # target exit with "unknown flag" before the container started. CAP_SYS_PTRACE alone
+        # was measured sufficient for gdb under the default seccomp profile.
+        self.assertNotIn("--security-opt", result.stdout)
+        self.assertNotIn("|| true", script)
+        self.assertIn("vulkan_device_snapshot.py", script)
+        self.assertIn("arm64-renderer-scope.sh", script)
+        self.assertNotIn("VulkanDevice.cpp:391", gdb)
+        gpu = subprocess.run(
+            ["make", "-n", "carla-ue-vulkan-device-state-gpu"],
+            cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        )
+        self.assertIn("--profile gpu run --rm -T", gpu.stdout)
+        self.assertIn("/etc/vulkan/icd.d/nvidia_icd.json", gpu.stdout)
+        self.assertIn("--cap-add SYS_PTRACE", gpu.stdout)
+
+    def test_vulkan_device_capability_comparator_is_declared(self):
+        script = (REPO_ROOT / "scripts/carla/compare_vulkan_device_state.py").read_text()
+        for contract in (
+            "device_extensions",
+            "core_features",
+            "missing_extensions",
+            "missing_core_features",
+            "not UE VkDeviceCreateInfo replay",
+        ):
+            self.assertIn(contract, script)
     def test_scw_worker_is_staged_under_linux_arm64_binary_directory(self):
         script = (
             REPO_ROOT / "scripts/carla/build-arm64-scw.sh"

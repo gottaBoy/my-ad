@@ -8,6 +8,7 @@ shader_cache="${CARLA_GLOBAL_SHADER_CACHE:-/artifacts/carla/cooked-server-full/E
 ue_dir="${CARLA_UE_DIR:-/workspace/unreal-engine}"
 carla_dir="${CARLA_SOURCE_DIR:-/workspace/carla}"
 artifact_dir="${CARLA_ARTIFACT_DIR:-/artifacts/carla}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 [[ -n "${cook_root}" && "${cook_root}" == /* ]] || {
   echo "CARLA_FULL_COOK_OUTPUT must name the full cook output directory" >&2
@@ -64,6 +65,7 @@ find "${carla_dir}/Unreal/CarlaUnreal/Content/Carla/Maps/Nav" \
 if [[ -d "${carla_dir}/Unreal/CarlaUnreal/Config" ]]; then
   cp -a "${carla_dir}/Unreal/CarlaUnreal/Config" "${stage_root}/"
 fi
+python3 "${script_dir}/normalize-runtime-config.py" --stage-root "${stage_root}"
 
 mkdir -p "${stage_root}/Plugins/Carla"
 if [[ -f "${cook_root}/CarlaUnreal/Plugins/Carla/Carla.uplugin" ]]; then
