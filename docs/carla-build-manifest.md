@@ -5,7 +5,9 @@
 - `config/carla/change-ledger.json` 说明每个 ARM64 兼容改造的原因、文件、验证和边界；
 - `capture_build_manifest.py` 记录某一次构建使用的主工程、CARLA、UE 源码状态、
   tracked patch、可重放的 untracked 文件快照，以及 `source.lock` pin 与实际 HEAD 的
-  漂移报告。当前格式为 schema 2；旧的仅 hash manifest 不会被自动视为完整源码备份。
+  漂移报告。当前格式为 schema 3；旧的仅 hash manifest 不会被自动视为完整源码备份。
+  schema 3 相对 schema 2 增加一项必填字段 `toolchain_image`，记录构建工具链镜像的
+  引用名与解析后的镜像 ID；schema 1 / 2 的 manifest 不再被 verify 接受。
 
 阶段报告只证明一个具体阶段。manifest 记录生成该阶段时的输入，二者不能互相替代。
 
@@ -38,6 +40,9 @@ Make 会挂载以下路径：
   和 executable 标志；
 - `Makefile`、Compose、`source.lock`、变更台账和 `scripts/carla` 的哈希；
 - 实际命令、容器架构、相关环境变量和被过滤的敏感变量名；
+- 工具链镜像的身份：`toolchain_image.reference`（如 `my-ad/carla-toolchain:arm64`）
+  与 `toolchain_image.id`（`docker image inspect` 解析出的镜像 ID）。标签是可变的，
+  所以 pin 用的是 ID；捕获时由 `make carla-manifest` 传入，未声明时记空字符串；
 - 相同目录中的 `manifest.json`。
 
 CARLA 和 UE 是独立挂载根，不要求位于主工程目录内。manifest 保存命名根的相对身份，
@@ -53,8 +58,12 @@ make carla-manifest-verify \
 ```
 
 验证会重新检查 native ARM64 环境、三个仓库的 HEAD/分支/状态、binary patch、untracked
-集合、关键文件集合和所有 SHA256。任何代码、兼容补丁、脚本、配置、台账或源码版本变化
-都会失败。已有 artifact 和 manifest 不会被覆盖。
+集合、关键文件集合、工具链镜像 **ID** 和所有 SHA256。任何代码、兼容补丁、脚本、配置、
+台账或源码版本变化都会失败。已有 artifact 和 manifest 不会被覆盖。
+
+工具链只比 `toolchain_image.id`，不比 `reference`：标签是指针，重建后默认名会被重新
+指向，旧标签也可能被移到别的 tag 上，这两种情况都不应让一份诚实的 manifest 变得无法
+复验。`reference` 仍然记录，供人读出当时用的是哪个标签。
 
 ## source.lock 漂移
 

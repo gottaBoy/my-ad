@@ -584,6 +584,1131 @@
         "make test-local"
       ],
       "boundary": "The drift report only records pin vs. HEAD state; it does not rewrite source.lock, prove a clean-checkout rebuild, or establish Editor/Cook/runtime acceptance."
+    },
+    {
+      "id": "arm64-cook-map-and-shader-scope",
+      "category": "cook-runtime",
+      "change": "Replace the ARM64 full-cook -COOKDIR scope with project-wide -cookall plus explicit -MAP requests derived from the staged OpenDrive specs and MapsToCook, add cook assertions for every requested map, every streaming sublevel and every Carla sensor material, move the Lavapipe shader-scope cvars into a shared file sourced by both the cook probe and the client launcher, and archive the client launch arguments through argv instead of an unsubscripted @Q expansion.",
+      "reason": "UE collects cook directories with FindFilesRecursive over the *.uasset extension only, so -COOKDIR cooked no *.umap and no plugin content: the previous full-cook PASS shipped a client missing Town01_Opt-Town07_Opt, Town_C, all streaming sublevels and several sensor materials, which failed the runtime gate with world and ISM errors. r.VirtualTextures and r.RayTracing are ECVF_ReadOnly, so a cook that disables a feature the client still enables aborts in FMaterial::GetShaderMap, and the unsubscripted array expansion recorded only \"timeout\" as launch provenance.",
+      "paths": [
+        "scripts/carla/probe-arm64-full-cook.sh",
+        "scripts/carla/arm64-renderer-scope.sh",
+        "scripts/carla/run-carla-lavapipe-sensors.sh",
+        "scripts/carla/normalize-runtime-config.py",
+        "scripts/carla/stage-arm64-cooked-client.sh",
+        "scripts/carla/stage-arm64-cooked-server.sh",
+        "tests/test_carla_runtime_probes.py",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "LinuxArm64Client -cookall PASS: 44142 packages, 0 errors, 330 cooked .umap, 87 streaming sublevels, 32 Carla sensor materials",
+        "Restaged client passed the RGB/LiDAR endpoint gate and the 6000-tick RPC/sensor/actor endpoint soaks on Town01_Opt; raw logs still contain handled InputSettings and Vulkan layout ensures, now archived by server-diagnostics.txt",
+        "make carla-lavapipe-sensors with no overrides PASS, recording all 30 launch arguments in client-command.json",
+        "Town10 stage normalization rewrote 2 stale config references to SM_DebrisContainer and verified the replacement cooked asset",
+        "Town10 default and no-pso Lavapipe diagnostics remain BLOCKED: map loads, but RenderThread/initialization does not reach a usable startup gate",
+        "Symbolized Town10 GDB captures: GameThread waits in first-frame FlushRenderingCommands while RenderThread moves from Lavapipe vkCreateComputePipelines(FRDGMemcpyCS) to vkCreateImageView; 400-second isolated run never reaches New episode",
+        "Structured runtime-config helper tests cover idempotence, missing cooked asset, malformed second config without partial rewrite and exact-match replacement",
+        "make test-local (551 tests, 56 skipped, 0 failures); bash -n, JSON and git diff --check passed"
+      ],
+      "boundary": "Proves the ARM64 cook covers runtime maps, streaming sublevels and sensor materials and that the cooked client produces the recorded Town01_Opt endpoint results under Lavapipe software rendering; Town10 first-frame rendering exceeds the diagnostic window but the exact driver-side cause is not established. It does not prove a clean UE log, Vulkan layout correctness, EnhancedInput runtime class resolution, GB10/NVIDIA Vulkan driver compatibility, GPU performance, Town10HD_Opt rendered availability, ROS/Autoware integration, or visual correctness behind the remaining cook warnings."
+    },
+    {
+      "id": "town10-nullrhi-rpc-render-isolation",
+      "category": "cook-runtime",
+      "change": "Add a bounded, isolated Town10HD_Opt NullRHI cooked-client RPC/tick gate that checks the actual CARLA world instead of relying on buffered UE startup logs; keep renderer workarounds experimental and archive SPIR-V and software Vulkan direct-RPC contrasts.",
+      "reason": "The staged Town10 map and OpenDRIVE load, but Lavapipe direct RPC fails at get_world() after version handshake while UE's first-frame rendering waits on Vulkan resources. NullRHI decouples the simulation data plane from this rendering boundary, and a repeatable gate can prove only the available portion without marking rendered sensors as working.",
+      "paths": [
+        "Makefile",
+        "scripts/carla/probe-town10-nullrhi-rpc.sh",
+        "tests/test_carla_runtime_probes.py",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "make carla-town10-nullrhi-rpc PASS: 20 ticks, handshake/world/sync-settings/cleanup all PASS on Town10HD_Opt, isolated port 20200",
+        "Final timeout-budget version repeated PASS: endpoint/stage-report.json SHA256 6edee936898d4749bb6f0fa734ce5b3a9bc5b5c5046a8a952603f1f7f9680ff1",
+        "Town10 Lavapipe direct RPC: version handshake PASS, get_world() fails with std::exception",
+        "45 captured compute shader SPIR-V files pass spirv-val --target-env vulkan1.3",
+        "Batch create: 45/45 captured shaders PASS on Lavapipe at /artifacts/carla/vulkan-compute-replay-20260926T060617Z-zYl5Bq",
+        "Batch create: 45/45 captured shaders PASS on NVIDIA GB10 at /artifacts/carla/vulkan-compute-replay-20260926T061052Z-xyqPQc; batch-result SHA256 43d0bbd3e3c64372026cbb1d06a9091824ccc25d9ba815a7cac4a3e367fc2c3",
+        "LP_NUM_THREADS=4 with cold and warm Mesa shader cache: get_world() still fails",
+        "make test-local (552 tests, 56 skipped, 0 failures); bash -n, JSON and git diff --check passed"
+      ],
+      "boundary": "Proves only Town10 cooked-client RPC and 20 synchronous ticks without rendering. Does not prove graceful server shutdown, rendered RGB/LiDAR, Town10 Lavapipe or GB10 Vulkan compatibility, GPU performance, visual correctness, or the exact root cause within the Vulkan pipeline path."
+    },
+    {
+      "id": "vulkan-compute-pipeline-replay",
+      "category": "vulkan-diagnostics",
+      "change": "Add an ARM64 Vulkan compute replay probe that uses the fork's SPIRV-Reflect to derive descriptor layouts, creates a compute pipeline, and optionally dispatches/readbacks a fixed storage-buffer shader; expose separate Lavapipe smoke and GB10 create Make targets and add glslang-tools to the ARM64 image.",
+      "reason": "Town10 Lavapipe stalls in UE's first-frame compute pipeline/resource path. A small independent create/dispatch probe separates invalid SPIR-V, backend pipeline creation, and UE-specific descriptor/device/layout behavior without changing the cooked client.",
+      "paths": [
+        "scripts/carla/vulkan-compute-replay.c",
+        "scripts/carla/vulkan-compute-smoke.comp",
+        "scripts/carla/probe-vulkan-compute-replay.sh",
+        "images/carla-arm64/Dockerfile",
+        "Makefile",
+        "tests/test_carla_runtime_probes.py",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Lavapipe fixture: pipeline create, dispatch and 64-word readback PASS via probe-vulkan-compute-replay.sh in the existing ARM64 session; artifact /artifacts/carla/vulkan-compute-replay-20260926T030018Z-lx4CW1",
+        "Town10 captured shader 0648...C4 create PASS via the same formal probe; artifact /artifacts/carla/vulkan-compute-replay-20260926T030341Z-QsQZnP; image rebuild with glslang-tools is pending",
+        "Town10 captured SPIR-V 0648...C4: SPIRV-Reflect layout and Lavapipe pipeline create PASS",
+        "45 captured compute SPIR-V files pass spirv-val --target-env vulkan1.3",
+        "UE GDB layout baseline: non-bindless, set0 binding0 UNIFORM_BUFFER_DYNAMIC, binding1 STORAGE_TEXEL_BUFFER, packed globals 48, SpirvCRC 651553000, finalized layout hash 3539589419",
+        "UE-layout override replay for shader main_00000628_26d5e8e8 PASS on Lavapipe; artifact /artifacts/carla/vulkan-compute-replay-20260926T041740Z-8AIv45; report remains ue_exact_replay=false",
+        "Same UE-layout replay on NVIDIA GB10 PASS; artifact /artifacts/carla/vulkan-compute-replay-20260926T043248Z-e95Uj0; pipeline create 11.6ms",
+        "UE vkCreateDevice GDB baseline: 36 device extensions; core shaderInt64/geometryShader/samplerAnisotropy/shaderImageGatherExtended enabled; Vulkan 1.1-1.3 feature support queried, but optimized pNext walk was not treated as reliable",
+        "make carla-ue-vulkan-device-state diagnostic snapshot PASS in existing ARM64 session: /artifacts/carla/ue-vulkan-device-state-20260926T101317Z-KwNY2x/device-create.json",
+        "make test-local (561 tests, 56 skipped, 0 failures)"
+      ],
+      "boundary": "The original baseline replay consumes the captured UE descriptor layout and all 45 captured compute shaders create independently on both Lavapipe and GB10. Actual device configuration capture/replay is recorded separately below; ue_exact_replay remains false because shader header, pipeline cache, shared-device lifecycle and module patching are not reproduced. It does not prove GB10 full runtime, Town10 rendered runtime, RGB/LiDAR, or a driver fix."
+    },
+    {
+      "id": "vulkan-device-state-captured-replay",
+      "category": "vulkan-diagnostics",
+      "change": "Replace source-line/local-variable GDB capture with typed Vulkan API entry arguments, validate complete schema 2 snapshots, generate exact enabled device feature/extension/queue configuration for optional isolated replay, and add a GPU capture Make entry. Reject incomplete legacy snapshots and report unverified capability requirements explicitly.",
+      "reason": "The previous snapshot mixed queried support with enabled policy and lacked feature-chain values and queue configuration. Replaying each backend's actual UE configuration tests this difference without altering UE runtime code or silently removing requirements.",
+      "paths": [
+        "scripts/carla/gdb_vulkan_device_capture.py",
+        "scripts/carla/dump-ue-vulkan-device-state.gdb",
+        "scripts/carla/probe-ue-vulkan-device-state.sh",
+        "scripts/carla/vulkan_device_snapshot.py",
+        "scripts/carla/probe-vulkan-compute-replay.sh",
+        "scripts/carla/vulkan-compute-replay.c",
+        "scripts/carla/compare_vulkan_device_state.py",
+        "tests/test_carla_vulkan_device_snapshot.py",
+        "tests/test_carla_vulkan_device_state.py",
+        "tests/test_carla_runtime_probes.py",
+        "Makefile",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "All 55 core VkBool32 fields and all accepted feature structs/sTypes checked against repository Vulkan 1.3.290 headers; typed queue/chain and malformed snapshot tests PASS",
+        "Mesa 23.2.1: complete API-entry snapshot, 27 extensions/14 pNext nodes/one queue group at /artifacts/carla/ue-vulkan-device-state-20260926T112849Z-d4ztqb; fixture smoke /artifacts/carla/vulkan-compute-replay-20260926T113244Z-euQTSZ and matched UE-layout create /artifacts/carla/vulkan-compute-replay-20260926T113308Z-opOhZu PASS",
+        "Mesa 25.2.8: complete snapshot, 36 extensions/21 nodes/one queue group at /artifacts/carla/ue-vulkan-device-state-20260926T113938Z-nnZEkt; fixture smoke /artifacts/carla/vulkan-compute-replay-20260926T114115Z-8LvAT0 and matched UE-layout create /artifacts/carla/vulkan-compute-replay-20260926T114115Z-OLYv9j PASS",
+        "NVIDIA GB10 580.173.02: complete snapshot, 39 extensions/26 nodes/two queue groups at /artifacts/carla/ue-vulkan-device-state-20260926T115742Z-5RoDwN; fixture smoke /artifacts/carla/vulkan-compute-replay-20260926T115918Z-unpiIi and matched UE-layout create /artifacts/carla/vulkan-compute-replay-20260926T115918Z-AnQTwV PASS",
+        "All fixture smoke runs dispatch and verify 64 host readback words; C compilation uses -Wall -Wextra -Werror",
+        "Legacy schema 1 rejected before compilation at /artifacts/carla/vulkan-compute-replay-20260926T113910Z-z8kMcJ; opposite-backend snapshots explicitly rejected for unsupported extensions at /artifacts/carla/vulkan-compute-replay-20260926T114753Z-bgjXgQ and /artifacts/carla/vulkan-compute-replay-20260926T115946Z-9xQP2M",
+        "make test-local (583 tests, 56 skipped, 0 failures); git diff --check and shell syntax PASS"
+      ],
+      "boundary": "Captures and reuses actual enabled device configuration but remains ue_exact_replay=false. The first compute shader is subsequently identified as ClearUAV, with target FRDGMemcpyCS correlation recorded separately below. Does not reproduce shared-device/resource lifetime or Town10 world/RGB/LiDAR. Existing session and temporary diagnostic container runs are not clean-image acceptance. Town10 rendered runtime and full GB10 CARLA acceptance remain BLOCKED; no UE Vulkan runtime policy change."
+    },
+    {
+      "id": "vulkan-target-pipeline-correlation",
+      "category": "vulkan-diagnostics",
+      "change": "Capture actual Vulkan module bytes and correlate returned module/layout/cache handles with a stack-selected compute call; record bounded return observations and same-cache graphics counts. Add cache initialization replay, strict matched compiled-run execution, shared diagnostic launch scope and separate capture/driver-return gates.",
+      "reason": "The previously matched first compute shader was ClearUAV, not the later FRDGMemcpyCS. Target-specific inputs and UE context observations are required before attributing Town10 stalls to a shader, device policy, driver cache or concurrency.",
+      "paths": [
+        "scripts/carla/arm64-vulkan-diagnostic-scope.sh",
+        "scripts/carla/gdb_vulkan_device_capture.py",
+        "scripts/carla/dump-ue-vulkan-device-state.gdb",
+        "scripts/carla/probe-ue-vulkan-device-state.sh",
+        "scripts/carla/gdb_vulkan_pipeline_capture.py",
+        "scripts/carla/dump-ue-vulkan-pipeline.gdb",
+        "scripts/carla/probe-ue-vulkan-pipeline.sh",
+        "scripts/carla/vulkan_pipeline_snapshot.py",
+        "scripts/carla/replay_captured_vulkan_pipeline.py",
+        "scripts/carla/vulkan-compute-replay.c",
+        "scripts/carla/probe-vulkan-compute-replay.sh",
+        "tests/test_carla_vulkan_pipeline_snapshot.py",
+        "Makefile",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Device capture regression PASS at /artifacts/carla/ue-vulkan-device-state-20260926T124441Z-1PJefa",
+        "Mesa 25 FRDGMemcpyCS API entry capture PASS: /artifacts/carla/ue-vulkan-pipeline-20260926T132317Z-iBrJwK; entry main_00000654_f5142477, actual module 1620 bytes, SHA256 dd368eb6dd97a96c2fe0d4976ee67c1f1697ccee72539a6cd5cd4c49e1fa3e84",
+        "Module bytes match prior captured CE81D3A4EF1457C0217A606C7F3552BA246F12CA.spv; captured layout is dynamic uniform buffer plus two storage buffers, flags/subgroup/push constants zero",
+        "Same cache initially empty, with 156 prior graphics creation calls and 40 prior successful compute return observations in the entry capture",
+        "Matching Mesa 25 isolated target replay PASS at /artifacts/carla/vulkan-compute-matched-20260926T133140Z-tv0w3aom; pipeline create 0.178ms, captured device/layout/initial-cache policy and ue_exact_replay=false",
+        "UE observe run /artifacts/carla/ue-vulkan-pipeline-20260926T133944Z-Hx5Z8D captured valid inputs but no target driver return within the 180-second total window; strict --require-driver-return recheck exits 3",
+        "Empty-initial-data cache fixture smoke PASS at /artifacts/carla/vulkan-compute-replay-20260926T125715Z-JMvdzD; malformed/mismatched cache header rejected at /artifacts/carla/vulkan-compute-replay-20260926T130616Z-U2nDQI",
+        "make test-local (602 tests, 56 skipped, 0 failures); git diff --check and shell syntax PASS"
+      ],
+      "boundary": "PASS is scoped to valid API input capture and isolated target creation, not UE driver return or sensors. Observe mode requires a recorded VK_SUCCESS and rejects pending returns. Runtime cache mutations, previous graphics/compute activity, resource lifetime and uninstrumented timing are not reproduced; allocation callback capture and target-only controls are recorded separately below. Exact root cause is not established. Temporary copied native tools and archived ARM64 binary reuse are not clean-image acceptance. Historical stalled shader permutation was not recorded directly. Town10 world/RGB/LiDAR and full GB10 CARLA acceptance remain BLOCKED; no UE rendering policy change."
+    },
+    {
+      "id": "vulkan-target-allocator-cache-controls",
+      "category": "vulkan-diagnostics",
+      "change": "Capture actual allocation callbacks for shader/layout/cache/compute creation and add explicitly gated, default-off target-only allocator-null and cache-null register controls. Preserve original/submitted inputs, verify register readback and reject intervened captures as unmodified replay inputs.",
+      "reason": "UE allocator implementation and a populated pipeline cache were unverified differences from the isolated replay. Actual pointer capture and single-call controls test these assumptions without changing renderer defaults or promoting a workaround.",
+      "paths": [
+        "scripts/carla/gdb_vulkan_pipeline_capture.py",
+        "scripts/carla/probe-ue-vulkan-pipeline.sh",
+        "scripts/carla/vulkan_pipeline_snapshot.py",
+        "tests/test_carla_vulkan_pipeline_snapshot.py",
+        "Makefile",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Mesa 25 baseline /artifacts/carla/ue-vulkan-pipeline-20260926T141626Z-nFV3l2: target/module/cache allocation callbacks actually NULL; same FRDGMemcpyCS module dd368eb6dd97a96c2fe0d4976ee67c1f1697ccee72539a6cd5cd4c49e1fa3e84; no target driver return within 180-second total window, exit 3",
+        "Target-only cache-null /artifacts/carla/ue-vulkan-pipeline-20260926T142133Z-ecFI5F: original cache nonzero, submitted cache 0x0, allocator remains NULL, same module/layout/flags and 156 same-cache prior graphics calls; still no target driver return, exit 3",
+        "Allocator-null experiment not run because the observed allocator was already NULL; no-op cannot count as an applied causal intervention",
+        "Tests verify callback completeness, one-argument changes, readback failure, default-off/observe-only safety, no-op handling and modified input rejection",
+        "make test-local (609 tests, 56 skipped, 0 failures); git diff --check and shell syntax PASS"
+      ],
+      "boundary": "Diagnostic controls terminate the owned inferior before UE resumes after target creation, are never renderer defaults and do not prove safe object destruction under changed allocators. Capture completeness is not driver success. Null allocation callbacks match the isolated case, and bypassing only the target cache argument did not fix the observed wait; device-wide cache history, prior work/resources and other driver state remain unverified. No unique root cause, permanent deadlock, clean-image, Town10 world/RGB/LiDAR or full GB10 runtime acceptance claim; all product gates remain BLOCKED."
+    },
+    {
+      "id": "town10-native-gb10-world-gate",
+      "category": "runtime-diagnostics",
+      "change": "Add a dedicated native GB10 runtime entry that binds the NVIDIA ICD/backend and ARM64 server identity, waits for the real Town10 RPC world/snapshot, and reuses existing endpoint gates. Add explicit no-pso/serial-translate diagnostics and crash-thread compute correlation that refuses unrelated targets.",
+      "reason": "Software Vulkan wait diagnosis and independent pipeline successes did not establish full native GB10 runtime acceptance. A true world gate and unmodified GPU startup tests distinguish hardware failures from Lavapipe waits without treating log markers as readiness.",
+      "paths": [
+        "scripts/carla/probe-town10-gb10-runtime.sh",
+        "scripts/carla/wait_carla_world.py",
+        "scripts/carla/gdb_vulkan_pipeline_capture.py",
+        "scripts/carla/probe-ue-vulkan-pipeline.sh",
+        "tests/test_carla_gb10_runtime.py",
+        "tests/test_carla_vulkan_pipeline_snapshot.py",
+        "Makefile",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Native GB10 580.173.02 identified by vulkaninfo and server log; default world-readiness FAIL at /artifacts/carla/town10-gb10-rpc-20260926T153908Z-SbsH1y with SIGSEGV in libnvidia-glvkspirv",
+        "no-pso world-readiness FAIL at /artifacts/carla/town10-gb10-rpc-20260926T154853Z-KgP5SW; same NVIDIA compiler crash signature",
+        "serial-translate world-readiness FAIL at /artifacts/carla/town10-gb10-rpc-20260926T161706Z-E2OvVX; r.RHICmd.ParallelTranslate.Enable=0 confirmed in log, crash remains",
+        "GDB /artifacts/carla/ue-vulkan-pipeline-20260926T160419Z-OUyULF observed all 50 compute calls return, then graphics shader-key/descriptor-bound assertions and UE SIGSEGV; no pending compute on the faulting thread, target remains null and capture correctly fails",
+        "Unit tests cover real world readiness versus handshake, map mismatch, server exit, transient recovery, bounds, explicit profiles and no fabricated compute target for noncompute faults",
+        "make test-local (619 tests, 56 skipped, 0 failures); git diff --check and shell syntax PASS"
+      ],
+      "boundary": "All three native GPU world gates failed, so no RPC ticks or RGB/LiDAR acceptance is claimed. Driver-library crash location alone does not establish root cause, and GDB changed the observed failure point. no-pso and serial-translate are explicit failed diagnostics, not fixes or defaults. Server shutdown, clean-image, throughput, visual correctness and ROS/Autoware remain excluded; Town10 world/RGB/LiDAR and full GB10 CARLA acceptance remain BLOCKED. No UE rendering source/policy change."
+    },
+    {
+      "id": "vulkan-first-fault-graphics-contract",
+      "category": "vulkan-diagnostics",
+      "change": "Add a minimal first-Vulkan-check/fatal-signal GDB capture with typed shader keys, current pipeline and descriptor layout association, bounded thread samples and diagnostic-only validation. Persist the ordered task checklist.",
+      "reason": "Creation API instrumentation changed the failure observed on GB10. Reading the first actual graphics check before downstream descriptor corruption establishes a concrete state-contract violation without fabricating a compute culprit or changing renderer policy.",
+      "paths": [
+        "scripts/carla/gdb_vulkan_fault_capture.py",
+        "scripts/carla/dump-ue-vulkan-fault.gdb",
+        "scripts/carla/probe-ue-vulkan-fault.sh",
+        "scripts/carla/vulkan_fault_snapshot.py",
+        "tests/test_carla_vulkan_fault_capture.py",
+        "Makefile",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "GB10 first graphics check captured at /artifacts/carla/ue-vulkan-fault-20260927T010756Z-eINmB6: stage 1/index 4, requested key 14181356269016821042, pending Pixel key 0 and null Pixel shader; descriptor layout contains only Vertex set",
+        "Capture fixes preserve old evidence: bounded C strings terminate at NUL; defer typed thread sampling from Breakpoint.stop to GDB stop event",
+        "Repeat /artifacts/carla/ue-vulkan-fault-20260927T011327Z-AypR2k: same failed check, different permutation and index 1, requested key 4417814085198955516 versus pending 0; pipeline/layout association matches, no capture read errors",
+        "16 focused tests PASS; validator independently checks shader keys, descriptor bounds and pipeline/layout association, and rejects timeout or exact-module provenance claims",
+        "make test-local: 635 tests, 56 skipped, 0 failures; shell syntax and git diff --check PASS; full output archived as local-regression.log in the repeat capture"
+      ],
+      "boundary": "CAPTURED_FAULT is evidence collection only, runtime_acceptance=false. No Vulkan creation API hooks, inferior function calls, register interventions or nested UE source changes. Two graphics captures establish a state mismatch but not its upstream source, nor causality with uninstrumented NVIDIA compiler SIGSEGV. Shader permutations differ. Stored containers are not exact submitted module inputs. Copied debugger tools, handled-ensure suppression and no-pso flags remain diagnostic, not clean-image or product defaults. Checklist item 2 remains partly open for exact NVIDIA fault inputs; Town10 world/RGB/LiDAR and full GB10 runtime acceptance remain BLOCKED."
+    },
+    {
+      "id": "vulkan-graphics-binding-history",
+      "category": "vulkan-diagnostics",
+      "change": "Add default-off bounded graphics binding history, live executing command-list identity and strict context/thread/list/shader correlation. Preserve optimized-out command identity, account for ring truncation, compare stage keys with addresses and prioritize renderer threads on timeout.",
+      "reason": "The first graphics contract failure lacked its preceding binding history. Optimized code and frequent debugger stops require explicit provenance and bounded negative evidence rather than substituting unrelated commands or treating absence of a crash as a fix.",
+      "paths": [
+        "scripts/carla/gdb_vulkan_fault_capture.py",
+        "scripts/carla/probe-ue-vulkan-fault.sh",
+        "scripts/carla/vulkan_fault_snapshot.py",
+        "tests/test_carla_vulkan_fault_capture.py",
+        "Makefile",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Initial return-point read at /artifacts/carla/ue-vulkan-fault-20260927T014720Z-83F8YB correctly fails on optimized-out this; no invented history",
+        "All-parameters prototype /artifacts/carla/ue-vulkan-fault-20260927T014927Z-PixK0i reaches its initial 10000-event limit without the original fault and remains FAIL",
+        "Selective trace /artifacts/carla/ue-vulkan-fault-20260927T015348Z-zx8AHX records 13994 events, retains 256 and drops 13738; retained binds have matching submitted/current PSOs and live list identity; no fault within the unchanged 150-second window, capture_complete=false and validator exits 2",
+        "Trace-off /artifacts/carla/ue-vulkan-fault-20260927T015729Z-nO2skz captures the original Pixel-key check again, requested 4417814085198955516 versus pending 0, stage 1/index 1; descriptor association matches and live executing list 0xe5ed26987d60 is observed",
+        "Optimized command-node and raw ShaderRHI addresses remain explicitly unavailable; no register guessing or inferior calls",
+        "30 focused tests PASS; make test-local: 649 tests, 56 skipped, 0 failures; shell syntax and git diff --check PASS"
+      ],
+      "boundary": "Binding trace is explicit and default off, not a rendering fix. The normal retained history is from a run that did not reproduce the fault, and earlier events were truncated; it is not a correlated causal history. Debugger scheduling, warm caches and run order are not isolated. Live command-list identity is not command-node identity; missing fields remain reported. No unique upstream root cause, NVIDIA input capture, clean-image, Town10 world/RGB/LiDAR or full GB10 acceptance claim. All product gates remain BLOCKED; no nested UE renderer source or default policy change."
+    },
+    {
+      "id": "vulkan-direct-memory-trace",
+      "category": "vulkan-diagnostics",
+      "change": "Compile a default-off UE VulkanRHI in-memory graphics trace and add a direct no-GDB runner/validator. Preserve an independent diagnostic stage with the new Development binary and cooked asset path.",
+      "reason": "GDB changed the observed graphics failure. An in-engine bounded ring can capture the exact PSO/shader-key transition at the first mismatch while direct execution removes debugger scheduling from the comparison.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanGraphicsDiagnostic.h",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanGraphicsDiagnostic.cpp",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPendingState.h",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanCommands.cpp",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipelineState.cpp",
+        "scripts/carla/probe-ue-vulkan-memory-trace.sh",
+        "scripts/carla/vulkan_graphics_memory_trace.py",
+        "tests/test_carla_vulkan_memory_trace.py",
+        "Makefile",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "ARM64 Development incremental build completed: VulkanGraphicsDiagnostic.cpp, VulkanCommands.cpp and VulkanPipelineState.cpp compile; CarlaUnreal link completed",
+        "Focused memory-trace tests: 5 PASS; existing fault capture tests: 30 PASS; shell syntax and outer git diff check PASS",
+        "First new-binary GDB attempt /artifacts/carla/ue-vulkan-fault-20260927T023138Z-kmSn59 failed before Vulkan due executable-path ICU lookup; retained as staging-path failure, not product evidence",
+        "Second GDB memory-enabled attempt /artifacts/carla/ue-vulkan-fault-20260927T023633Z-Dkjv2Z reached Town10 but did not capture a fault before bounded timeout; capture incomplete and no trace",
+        "Direct no-GDB attempt /artifacts/carla/ue-vulkan-memory-trace-20260927T024452Z-aZ6Nne loaded Town10, reached Engine initialized, exited at bounded timeout with normal PreExit and no trace; wrapper exits 3 rather than claiming PASS",
+        "make test-local: 654 tests, 56 skipped, 0 failures; shell syntax and outer git diff --check PASS"
+      ],
+      "boundary": "The in-engine trace is diagnostic and explicit-only; normal renderer behavior remains unchanged when the command line is absent. Direct no-GDB absence of mismatch is not a fix or runtime acceptance and does not reproduce RGB/LiDAR/tick gates. No exact NVIDIA compiler inputs, unique graphics root cause, clean-image provenance, Town10 acceptance or product workaround is claimed. The independent diagnostic stage is not clean-image acceptance."
+    },
+    {
+      "id": "vulkan-nvidia-exact-compute-fault-input",
+      "category": "vulkan-diagnostics",
+      "change": "Extend explicit UE compute shader diagnostics with begin/result attempt markers, UE layout binding metadata and pipeline-cache snapshots; capture the exact native GB10 NVIDIA compiler-fault input and perform a matching isolated cache replay.",
+      "reason": "The native GB10 crash persisted with the newly compiled binary. Exact module, layout, cache and no-return phase evidence is required before changing renderer behavior.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipeline.cpp",
+        "scripts/carla/probe-town10-gb10-runtime.sh",
+        "scripts/carla/probe-ue-vulkan-pipeline.sh",
+        "scripts/carla/vulkan-compute-b075-ue.layout",
+        "tests/test_carla_gb10_runtime.py",
+        "tests/test_carla_vulkan_pipeline_snapshot.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "New ARM64 Development binary runtime /artifacts/carla/town10-gb10-rpc-20260927T025316Z-I8xOdZ reproduces SIGSEGV in libnvidia-glvkspirv.so.580.173.02 at address 0x8",
+        "Direct shader diagnostics /artifacts/carla/town10-gb10-rpc-20260927T032257Z-KMRgf2 captures B07511BF3F84ED1435DC4ECA18879491A24EE19E, entry main_0000142c_a6b37050, 5164-byte SPIR-V SHA256 b5500d7af1d3f07a15118d78fc784d062e343140d8431bee713e3ba1d3710bf3, UE bindings 8,3,3,3,3,2,0, cache_bytes=21098, begin without result",
+        "Captured SPIR-V passes spirv-val Vulkan 1.3 validation",
+        "Matching GB10 isolated replay /artifacts/carla/vulkan-compute-replay-20260927T045705Z-GMyhcu reports PASS in 0.016217s with the same shader, UE layout, captured cache initialization and reused vkCreateDevice snapshot"
+      ],
+      "boundary": "Exact native driver-fault input is now archived, but isolated replay does not recreate full UE VkDevice history, concurrency, object lifetime or resource state. The result narrows the root cause to complete UE context/history or an unmodeled input difference; it does not prove cache causality or authorize a fix. No shader/layout/cache/concurrency default change, Town10 acceptance, RGB/LiDAR acceptance or clean-image claim."
+    },
+    {
+      "id": "vulkan-b075-no-pso-crosscheck",
+      "category": "vulkan-diagnostics",
+      "change": "Run the new Development binary with no-pso/serializing renderer flags and the exact compute shader diagnostics to test whether PSO precaching, async pipeline compilation or the Vulkan RHI thread is the trigger.",
+      "reason": "A low-cost scheduling/profile explanation needed a controlled native GB10 cross-check after the exact B075 input was captured.",
+      "paths": [
+        "scripts/carla/probe-town10-gb10-runtime.sh",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Native GB10 no-pso run /artifacts/carla/town10-gb10-rpc-20260927T042546Z-Cp5Xwr still reaches B075 entry main_0000142c_a6b37050 and crashes in libnvidia-glvkspirv.so.580.173.02 at address 0x8",
+        "No-pso command explicitly contains PSOPrecaching=0, AllowPSOPrecaching=0, AsyncPipelineCompile=0 and Vulkan.RHIThread=0",
+        "No-pso and default exact shader/layout/cache evidence do not produce a product PASS; isolated replay remains PASS while full UE runtime remains FAIL"
+      ],
+      "boundary": "No-pso is a failed diagnostic cross-check, not a fix or product default. It does not isolate full VkDevice history, object lifetime, cache access timing or driver state. Town10 world/RGB/LiDAR/full GB10 acceptance remains BLOCKED."
+    },
+    {
+      "id": "vulkan-compute-history-and-serialization-crosscheck",
+      "category": "vulkan-diagnostics",
+      "change": "Add a same-VkDevice compute history replay mode and a default-off UE compute-pipeline creation serialization switch.",
+      "reason": "Test whether the exact three preceding compute pipeline creations or duplicate concurrent compute creation are sufficient causes of the native B075 NVIDIA crash.",
+      "paths": [
+        "scripts/carla/vulkan-compute-replay.c",
+        "scripts/carla/probe-vulkan-compute-replay.sh",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipeline.cpp",
+        "scripts/carla/probe-town10-gb10-runtime.sh",
+        "tests/test_carla_runtime_probes.py",
+        "tests/test_carla_gb10_runtime.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Same-device history replay /artifacts/carla/vulkan-compute-replay-20260927T053512Z-doKJSA creates 3 preceding compute pipelines and B075 with history_pipeline_count=3; PASS in 0.012512s using captured device/cache/layout",
+        "UE compute-pipeline serialization diagnostic /artifacts/carla/town10-gb10-rpc-20260927T053940Z-B0DZTA still reaches B075 and crashes in libnvidia-glvkspirv.so.580.173.02 at address 0x8",
+        "Focused runtime/replay contracts pass; full local regression remains 654 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "Compute history alone and compute creation concurrency alone are not sufficient explanations. The serialization switch is diagnostic-only and default off; no renderer policy or product workaround is promoted. Graphics pipeline/resource history, command context and object lifetime remain unmodeled; all Town10/RGB/LiDAR/full GB10 acceptance gates remain BLOCKED."
+    },
+    {
+      "id": "vulkan-graphics-create-serialization-crosscheck",
+      "category": "vulkan-diagnostics",
+      "change": "Add a default-off lock around actual vkCreateGraphicsPipelines driver calls and record same-run pipeline history before the B075 compute target.",
+      "reason": "The exact history showed many graphics pipeline begins still in flight when B075 started. A driver-call serialization cross-check tests whether graphics compilation concurrency alone triggers the native NVIDIA crash.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipeline.cpp",
+        "scripts/carla/probe-town10-gb10-runtime.sh",
+        "tests/test_carla_gb10_runtime.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Graphics serialization marker confirmed in /artifacts/carla/town10-gb10-rpc-20260927T111037Z-y4Ip13/server.log",
+        "Same run still crashes in libnvidia-glvkspirv.so.580.173.02 at address 0x8",
+        "The same run records two B075 begin attempts without result files; the compute-serialization run had one B075 begin and still crashed",
+        "Previous same-run pipeline history /artifacts/carla/town10-gb10-rpc-20260927T103619Z-XBGVTj contains 2594 events and 34 unmatched graphics begins before B075"
+      ],
+      "boundary": "Graphics call serialization is diagnostic-only and default off. Its failure does not prove graphics history is irrelevant; it only rejects graphics driver-call concurrency as a sufficient single cause. Duplicate B075 creation is observed but not sufficient. No product workaround or acceptance claim."
+    },
+    {
+      "id": "vulkan-graphics-history-shader-correlation",
+      "category": "vulkan-diagnostics",
+      "change": "Persist unique graphics shader SPIR-V during explicit pipeline history capture and add a bounded analyzer that correlates unmatched graphics creates to module hashes, threads, layouts and render passes.",
+      "reason": "The same-run history showed graphics creates still in flight when B075 began; module handles alone were insufficient to build the next graphics replay input set.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipeline.cpp",
+        "scripts/carla/analyze_vulkan_pipeline_history.py",
+        "tests/test_carla_vulkan_pipeline_history.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Native GB10 history /artifacts/carla/town10-gb10-rpc-20260927T122856Z-9n8I53 saves 219 unique graphics SPIR-V files and a same-run pipeline-history.txt",
+        "Analyzer output reports 1273 events, 628 results and 16 unmatched graphics creates across 14 threads before B075",
+        "Each unmatched graphics event is correlated to VS/PS shader hashes, module handles, layout, render pass and cache; analysis JSON retained",
+        "Three analyzer unit tests PASS; full local regression remains 654 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "Graphics shader dumps and history analysis are explicit diagnostics only. They do not constitute a graphics PSO replay or prove that any one unmatched call is the root cause. Render-pass inputs and full resource state remain incomplete; no engine behavior or product defaults changed."
+    },
+    {
+      "id": "vulkan-render-pass-history-capture-boundary",
+      "category": "vulkan-diagnostics",
+      "change": "Add explicit render-pass attachment/layout summary collection to graphics history diagnostics.",
+      "reason": "Graphics shader/module correlation is insufficient for graphics PSO replay without the render-pass contract.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipeline.cpp",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "ARM64 Development compile completed",
+        "Latest GB10 run /artifacts/carla/town10-gb10-rpc-20260927T130910Z-R7ug74 saved graphics shader files but produced an empty pipeline-history.txt; render-pass evidence is explicitly incomplete",
+        "Prior complete history /artifacts/carla/town10-gb10-rpc-20260927T122856Z-9n8I53 remains the authoritative 16-unmatched-graphics evidence"
+      ],
+      "boundary": "Render-pass capture is not yet a valid replay input. No root-cause or product-acceptance claim; diagnostic switches remain default off."
+    },
+    {
+      "id": "vulkan-render-pass-history-complete",
+      "category": "vulkan-diagnostics",
+      "change": "Fix the explicit pipeline-history target capture and persist render-pass summaries alongside graphics shader/module mappings.",
+      "reason": "Graphics replay input required render-pass attachment/layout information in the same run as the unmatched graphics creates.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipeline.cpp",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Native GB10 run /artifacts/carla/town10-gb10-rpc-20260927T134801Z-Almx5m writes pipeline-history.txt before B075",
+        "History contains 2542 events, 1257 results, 27 unmatched graphics creates and B075 as the final compute begin",
+        "542 unique graphics shader SPIR-V files and 15 render-pass summaries are retained",
+        "Target mismatch visibility is now logged at Warning; history analyzer remains bounded and fail-closed"
+      ],
+      "boundary": "The captured render-pass and shader data define a replay input set but not a complete graphics PSO replay. Vertex/blend/raster/depth/dynamic/subpass/resource state remains incomplete. Diagnostics are explicit-only and default off; no product fix or runtime acceptance claim."
+    },
+    {
+      "id": "vulkan-graphics-fixed-state-safe-capture",
+      "category": "vulkan-diagnostics",
+      "change": "Reduce graphics fixed-state history capture to bounded top-level pointer/count/subpass fields after the nested-array diagnostic path produced incomplete evidence.",
+      "reason": "The capture mechanism itself must not destabilize or corrupt the failure path before graphics replay inputs are trusted.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipeline.cpp",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "ARM64 Development compile completed after reducing GraphicsFixedState",
+        "make test-local: 657 tests, 56 skipped, 0 failures",
+        "git diff --check and shell syntax PASS",
+        "No new GB10 runtime claim made; safe capture runtime verification remains pending"
+      ],
+      "boundary": "The safe fixed-state capture is explicit diagnostic code, default off. Subsequent runtime validation is recorded separately; it does not constitute a replay or product fix."
+    },
+    {
+      "id": "vulkan-mixed-driver-entry-capture",
+      "category": "vulkan-diagnostics",
+      "change": "Persist paired compute and graphics driver-entry/return markers after acquiring the optional mixed creation lock; record graphics shader hashes alongside module handles.",
+      "reason": "Pipeline-history and shader-diagnostic begin markers precede the serialization lock and cannot identify the driver call active at a process crash.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipeline.cpp",
+        "tests/test_carla_gb10_runtime.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "ARM64 Development incremental compile completed and diagnostic stage binary hash matched source",
+        "GB10 run 20260928T000321Z-YgVbHN: compute driver 4 enter / 3 return; compiler SIGSEGV",
+        "GB10 runs 20260928T000626Z-hBG42M and 20260928T000924Z-FEfsfs: graphics driver 626/625 and 631/630 enter/return; all 3 compute calls returned in both",
+        "Last graphics marker identifies two shader hashes with retained same-run SPIR-V",
+        "make test-local: 662 tests, 56 skipped, 0 failures; changed-file diff checks passed"
+      ],
+      "boundary": "The unmatched driver-entry marks an active API call, not proof that a particular shader or the NVIDIA driver alone caused the fault. Checkpoint history may predate the fault. World/RPC/sensor acceptance remains BLOCKED; flags and recording are default off."
+    },
+    {
+      "id": "vulkan-graphics-exact-module-and-bounded-inputs",
+      "category": "vulkan-diagnostics",
+      "change": "Capture the SPIR-V bytes passed to vkCreateShaderModule on the module object, bounded graphics create fields and UE layout/render-pass summaries at the serialized driver entry; optionally capture bounded graphics pipeline cache bytes. Automatically validate same-run entry, module bytes, and cache linkage.",
+      "reason": "Earlier shader dumps contained unpatched source SPIR-V, while the actual Vulkan module may contain input-attachment patching. Complete replay requires exact module bytes and creation state tied to the only unreturned driver call.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanResources.h",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanShaders.cpp",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipeline.cpp",
+        "scripts/carla/analyze_vulkan_driver_entries.py",
+        "scripts/carla/probe-town10-gb10-runtime.sh",
+        "Makefile",
+        "tests/test_carla_gb10_runtime.py",
+        "tests/test_carla_vulkan_driver_entries.py",
+        "docs/carla-dgx-audit.md",
+        "docs/carla-dgx-todo.md"
+      ],
+      "validation": [
+        "Native ARM64 Development client incremental builds succeeded; binary and isolated diagnostic stage hashes match",
+        "GB10 run 20260928T015955Z-R0V6SI: graphics 645 enter / 644 return; compute 3/3; unreturned graphics has two exact module bytes and 21097 cache bytes; automatic analyzer code 0",
+        "GB10 run 20260928T020235Z-WCiO9k: graphics 670/669; compute 3/3; unreturned graphics has two exact module bytes, 21098 cache bytes, bounded fixed state, layout and attachment references; analyzer code 0",
+        "make test-local: 670 tests, 56 skipped, 0 failures; changed-file diff and shell syntax checks passed",
+        "Unit tests reject partial markers, path escapes, missing or mismatched SPIR-V entries, multiple unreturned calls and unlinked cache bytes"
+      ],
+      "boundary": "At the time of this entry the snapshot remained replay_ready=false: UE render-target layout summaries were not the actual VkRenderPassCreateInfo(2) object graph. A subsequent entry records actual render-pass capture and independent replay; GB10 world/sensor acceptance is still blocked."
+    },
+    {
+      "id": "vulkan-renderpass-actual-create-and-isolated-graphics-replay",
+      "category": "vulkan-diagnostics",
+      "change": "Capture actual vkCreateRenderPass/vkCreateRenderPass2KHR arguments at successful creation, map their handle to the graphics driver-entry, and generate a narrowly scoped isolated graphics create using same-run modules, cache and pipeline state with a separately captured device configuration.",
+      "reason": "UE render-target layout summaries can differ from Vulkan render-pass creation arguments. Only an actual render-pass graph plus the faulting pipeline inputs can test whether that graphics PSO crashes in an independent device.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanRenderpass.h",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanRenderpass.cpp",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipeline.cpp",
+        "scripts/carla/analyze_vulkan_driver_entries.py",
+        "scripts/carla/prepare_vulkan_graphics_replay.py",
+        "scripts/carla/probe-vulkan-graphics-replay.sh",
+        "scripts/carla/vulkan-graphics-replay.c",
+        "tests/test_carla_gb10_runtime.py",
+        "tests/test_carla_vulkan_driver_entries.py",
+        "tests/test_carla_vulkan_graphics_replay.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Native ARM64 Development client compiled VulkanRenderpass.cpp and VulkanPipeline.cpp and relinked; diagnostic stage hash matched source",
+        "GB10 20260928T023252Z-ZxrO4t: graphics 676/675, compute 3/3; 28 render-pass files have capture_complete=1; faulting graphics links to actual vkCreateRenderPass2KHR data",
+        "GB10 20260928T024745Z-7E9KIF: graphics 625/624, compute 3/3; different repeatable VS/PS input links to a complete render-pass2 and real cache",
+        "Isolated GB10 create PASSED for both captures in vulkan-graphics-replay-20260928T024620Z-Ir2apU and vulkan-graphics-replay-20260928T024826Z-ursarG, using validated modules, same-run cache and separately captured UE device configuration",
+        "make test-local: 678 tests, 56 skipped, 0 failures; shell syntax and changed-file diff checks passed"
+      ],
+      "boundary": "Both isolated pipeline creates PASS but the device-create snapshot came from another UE run, and the independent process lacks UE object lifetime and driver history. Neither PASS is a complete same-process replay or a product fix; Town10 world/RGB/LiDAR remain BLOCKED."
+    },
+    {
+      "id": "vulkan-gdb-device-only-capture",
+      "category": "vulkan-diagnostics",
+      "change": "Allow the GDB pipeline probe to retain a complete same-process vkCreateDevice snapshot as CAPTURED_DEVICE_ONLY when a crash-mode compute target is absent, and allow SPIR-V validation to be deferred to a build container that has spirv-val.",
+      "reason": "A graphics fault can occur before the compute target handler; failing the whole probe discards valid device configuration evidence. GPU diagnostic containers may lack SPIRV-Tools while build containers have the validator.",
+      "paths": [
+        "scripts/carla/probe-ue-vulkan-pipeline.sh",
+        "tests/test_carla_vulkan_pipeline_snapshot.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "29 pipeline snapshot tests plus bounds/deferred-validation tests pass",
+        "GB10 GDB run /artifacts/carla/ue-vulkan-pipeline-20260928T050306Z-oEG3Rk captured schema_version=2 complete device state on NVIDIA 580.173.02",
+        "Snapshot contains 39 device extensions, 26 feature-chain nodes and queue families (0,16) and (1,1); SHA256 f0a4e32e36d655432897d28dbbefa3287c4cc8f637607388dd643abcd71fa30c",
+        "Independent graphics replay using this current-environment snapshot passed at /artifacts/carla/vulkan-graphics-replay-20260928T050903Z-9Cgo92",
+        "make test-local: 680 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "The GDB process timed out before reproducing the exact graphics fault; pipeline capture had 224 modules, 91 descriptor layouts, 102 pipeline layouts, 48 compute calls and incomplete target correlation. CAPTURED_DEVICE_ONLY is not UE exact replay or runtime acceptance."
+    },
+    {
+      "id": "vulkan-same-process-device-fault-and-compute-replay",
+      "category": "vulkan-diagnostics",
+      "change": "Add a low-interference GDB launcher that captures vkCreateDevice and continues after it, while the compiled engine driver-entry markers capture the eventual fault; replay the exact unreturned compute module/layout/cache with the same-process device snapshot.",
+      "reason": "High-frequency GDB object breakpoints changed timing and failed to reach the graphics fault. A device-only breakpoint preserves timing while retaining exact device configuration for the fault process.",
+      "paths": [
+        "scripts/carla/gdb_vulkan_device_capture.py",
+        "scripts/carla/dump-ue-vulkan-device-fault.gdb",
+        "scripts/carla/probe-gb10-device-fault.sh",
+        "tests/test_carla_gb10_device_fault.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "GB10 fault directory /artifacts/carla/gb10-device-fault-20260928T054047Z-DbJisL: device snapshot complete SHA b719168834c4b669107b90f4663c8e0f6b9b75798a885d4dfd4e7f3d8a5885cf",
+        "Same process has 642 graphics and 4 compute driver entries; unique unreturned compute main_00000290_c1eca148; 385 exact modules and 15 render-pass snapshots validated",
+        "GDB stack includes SIGSEGV in libnvidia-glvkspirv.so.580.173.02 on NVIDIA GB10",
+        "Exact same-process compute SPIR-V (656 bytes), cache (21098 bytes), layout and device snapshot replay PASS in compute-replay/result.json",
+        "Device-fault launcher and pipeline snapshot tests pass"
+      ],
+      "boundary": "The independent compute replay is not a UE same-process replay and does not capture shared cache ownership, object lifetime, creation ordering or concurrent API state. A subsequent cache-lifecycle diagnostic records a bounded subset of cache operations; Town10/RGB/LiDAR acceptance remains BLOCKED."
+    },
+    {
+      "id": "vulkan-cache-lifecycle-observation",
+      "category": "vulkan-diagnostics",
+      "change": "Record ordered create, destroy, merge and get-data calls from VulkanPipeline.cpp plus serialized graphics/compute driver enter/return; validate sequence, pending calls, cache lifetime and overlapping accesses in the actual fault process.",
+      "reason": "Independent create succeeds with the captured device/shader/cache inputs; distinguishing a live shared cache from destroyed or concurrently accessed cache requires fault-time events.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipeline.cpp",
+        "scripts/carla/analyze_vulkan_cache_lifecycle.py",
+        "scripts/carla/probe-town10-gb10-runtime.sh",
+        "scripts/carla/probe-gb10-device-fault.sh",
+        "Makefile",
+        "tests/test_carla_vulkan_cache_lifecycle.py",
+        "tests/test_carla_gb10_device_fault.py",
+        "tests/test_carla_gb10_runtime.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "ARM64 Development compiled VulkanPipeline.cpp and relinked; isolated diagnostic stage binary hash matched source",
+        "GB10 with graphics cache snapshot enabled: town10-gb10-rpc-20260928T075319Z-VxXQwN, 1497 lifecycle events, cache live; 27 earlier overlaps include diagnostic get-data calls, no overlap during the unreturned compute call",
+        "GB10 without graphics snapshot or shader dumps: town10-gb10-rpc-20260928T075611Z-WbnOdX, 1285 lifecycle events; fault cache live, no observed overlaps",
+        "Same-fault-process GDB capture: gb10-device-fault-20260928T080152Z-wd1TxJ, complete device snapshot, NVIDIA compiler SIGSEGV, compute 4/3, graphics 622/622, 1253 cache lifecycle events; fault cache live, no observed overlap",
+        "Full local regression and shell/diff checks pass"
+      ],
+      "boundary": "Only VulkanPipeline.cpp cache operations were covered by the original entry; subsequent entries add selected chunked-cache and object lifetime coverage. Overlapping diagnostic get-data is not evidence of a production race; complete Vulkan call ordering, root cause and GB10 Town10/RGB/LiDAR acceptance remain unestablished."
+    },
+    {
+      "id": "vulkan-deferred-object-lifetime-observation",
+      "category": "vulkan-diagnostics",
+      "change": "Extend the opt-in ordered cache lifecycle file with shader module, pipeline layout and render-pass creation, deferred deletion enqueue and actual Vulkan destruction; validate fault marker handles against live objects rather than confusing enqueue with destruction.",
+      "reason": "The cache survives at the fault, so module/layout/pass use-after-destroy must be distinguished from UE's deferred deletion queue.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/CarlaVulkanObjectLifecycle.h",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipeline.cpp",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanShaders.cpp",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanRenderpass.h",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanMemory.cpp",
+        "scripts/carla/analyze_vulkan_cache_lifecycle.py",
+        "tests/test_carla_vulkan_cache_lifecycle.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "ARM64 Development compiled VulkanMemory.cpp, VulkanShaders.cpp, VulkanRenderpass.cpp and VulkanPipeline.cpp, then relinked",
+        "Low-interference GB10 GDB run gb10-device-fault-20260928T084351Z-E45puG: complete same-fault-process device snapshot, NVIDIA compiler SIGSEGV, compute B075 unreturned, 2527 lifecycle events; cache/module/layout live and not queued at fault",
+        "Final staged binary SHA 55e88d97bfaf5486205058f03217a467171c9d9632ff7d8475644cce630822eb; GB10 runtime town10-gb10-rpc-20260928T085350Z-iP6Een: 2539 lifecycle events, unique unreturned compute, cache/module/layout live and unqueued; no observed fault-time cache overlap",
+        "Device configuration fields in three fault snapshots match after excluding run metadata; make test-local 691 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "Only selected creation/deferred-destruction sites and VulkanPipeline.cpp cache calls were traced. No claim about uninstrumented chunked-cache/bindless/other Vulkan APIs, driver internal state or root cause; all product runtime gates remain BLOCKED."
+    },
+    {
+      "id": "vulkan-chunked-cache-lifecycle-coverage",
+      "category": "vulkan-diagnostics",
+      "change": "Route VulkanChunkedPipelineCache cache create/get-data/destroy calls through the opt-in lifecycle recorder.",
+      "reason": "Chunked cache calls bypass VulkanPipeline.cpp and otherwise leave a cache ownership gap.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/CarlaVulkanObjectLifecycle.h",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanChunkedPipelineCache.cpp",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "ARM64 Development compiled VulkanChunkedPipelineCache.cpp and relinked",
+        "GB10 run town10-gb10-rpc-20260928T101159Z-vaBhus: 2602 lifecycle events; graphics 655/655, compute 4/3; fault cache/module/layout live and no fault-time cache overlap",
+        "No chunk-specific cache object appeared in this run, so actual chunk eviction remains untested",
+        "make test-local: 691 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "Coverage is diagnostic only; bindless and other direct Vulkan paths remain uninstrumented. No product fix or GB10 Town10/RGB/LiDAR acceptance claim."
+    },
+    {
+      "id": "vulkan-bindless-descriptor-lifecycle-coverage",
+      "category": "vulkan-diagnostics",
+      "change": "Record descriptor-set layout and bindless pipeline-layout creation, deferred enqueue and actual destruction in the opt-in lifecycle stream.",
+      "reason": "Bindless and descriptor-buffer layout calls bypassed the regular FVulkanLayout path and were not represented in object lifetime evidence.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanDescriptorSets.cpp",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanRHI.cpp",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanMemory.cpp",
+        "scripts/carla/analyze_vulkan_cache_lifecycle.py",
+        "tests/test_carla_vulkan_cache_lifecycle.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "ARM64 Development compiled VulkanDescriptorSets.cpp, VulkanRHI.cpp and VulkanMemory.cpp",
+        "GB10 run town10-gb10-rpc-20260928T144007Z-4BrcUZ: 2758 lifecycle events, graphics 639/639, compute 4/3; parser exit 0",
+        "Fault cache/module/layout remain live and no fault-time cache overlap observed",
+        "Current Town10 layouts report bindless=0; descriptor/bindless path is instrumented but not exercised as enabled behavior",
+        "Full local regression remains 693 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "This covers lifecycle recording only. It does not prove bindless-enabled behavior, driver internal state, root cause or GB10 Town10/RGB/LiDAR acceptance."
+    },
+    {
+      "id": "vulkan-driver-entry-allocator-observation",
+      "category": "vulkan-diagnostics",
+      "change": "Record the actual allocation-callback pointer and pUserData submitted with graphics/compute pipeline creation at the serialized driver entry.",
+      "reason": "Independent replay uses a NULL allocator; the full UE call path must be compared rather than assuming VULKAN_CPU_ALLOCATOR policy.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipeline.cpp",
+        "tests/test_carla_gb10_runtime.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "ARM64 Development pipeline binary rebuilt and staged",
+        "GB10 run town10-gb10-rpc-20260929T015350Z-Dw2UCr records allocator=0x0 and allocator_user_data=0x0 for graphics and faulting compute",
+        "Run still SIGSEGVs in NVIDIA 580.173.02; cache/module/layout lifecycle has no fault-time overlap",
+        "Full local regression: 693 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "NULL allocator matches isolated replay and is only a negative-difference result. It does not establish the root cause or product acceptance."
+    },
+    {
+      "id": "gb10-vulkan-validation-layer-contrast",
+      "category": "vulkan-diagnostics",
+      "change": "Add an opt-in Khronos validation layer path to the GB10 Town10 runtime gate: a script that fetches and checksums the pinned jammy 1.3.204.1-2 layer into data/cache/vulkan-validation-layer, a read-only compose mount at /opt/vulkan-validation-layer, and CARLA_RUNTIME_VULKAN_VALIDATION which exports VK_LAYER_PATH/LD_LIBRARY_PATH, appends -vulkanvalidation=1 and archives the layer manifest hashes into vulkan-validation.json.",
+      "reason": "The NVIDIA SPIR-V compiler crash only occurs in the full UE process while the identical shader, layout, cache, device and allocator pass in isolation, so the remaining difference is call order, concurrency or driver-internal state. The validation layer wraps every entry point with its own dispatcher lock, which serializes the driver call stream and is therefore a direct contrast for a concurrency-dependent failure.",
+      "paths": [
+        "scripts/carla/fetch-vulkan-validation-layer.sh",
+        "scripts/carla/probe-town10-gb10-runtime.sh",
+        "compose.carla-arm64.yaml",
+        "Makefile",
+        "tests/test_carla_gb10_runtime.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "make carla-town10-gb10-runtime RUNTIME_VULKAN_VALIDATION=1 PASS twice: town10-gb10-rpc-20261001T040959Z-8xFK8j and town10-gb10-rpc-20261001T041158Z-omIeYU, world ready, 20 ticks, endpoint gate PASS, stop code 143, zero SIGSEGV/Critical error markers",
+        "Same client with CARLA_RUNTIME_VULKAN_VALIDATION=0 FAIL twice with libnvidia-glvkspirv.so.580.173.02 SIGSEGV: town10-gb10-rpc-20261001T041227Z-hH7BLh and town10-gb10-rpc-20261001T041045Z-PbzaUn",
+        "Layer-reported VUIDs are 1.3.204 false positives only: unknown pNext VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_POSITION_FETCH_FEATURES_KHR (1000481000) plus VkPhysicalDeviceProperties2 and VkMemoryBarrier2/VkImageMemoryBarrier2 stage-mask VUIDs",
+        "Runtime bindless/descriptor-buffer is never enabled on GB10 (LogRHI 'insufficient property support'), closing the untested-bindless item as not applicable to this configuration",
+        "Full local regression: 696 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "This is a correlation, not an established root cause: the layer also changes timing, so a pure timing effect is not excluded, and it does not identify which concurrently used entry point (vkCreateShaderModule, layout/descriptor creation, vkGetPipelineCacheData, vkMergePipelineCaches) is involved. A run with the diagnostic layer is not product acceptance; the layer is not part of the product launch command and GB10 Town10/RGB/LiDAR acceptance remains BLOCKED."
+    },
+    {
+      "id": "carla-probe-port-preflight-time-wait",
+      "category": "harness",
+      "change": "Set SO_REUSEADDR on the port availability preflight of the GB10 runtime, Town10 NullRHI, UE Vulkan fault and UE Vulkan memory-trace probes.",
+      "reason": "The preflight bound without SO_REUSEADDR, so a TIME_WAIT socket from the immediately preceding run made the next run fail with EADDRINUSE before any run directory was created; the failure was reported as a generic exit 1 and could be misread as a product regression.",
+      "paths": [
+        "scripts/carla/probe-town10-gb10-runtime.sh",
+        "scripts/carla/probe-town10-nullrhi-rpc.sh",
+        "scripts/carla/probe-ue-vulkan-fault.sh",
+        "scripts/carla/probe-ue-vulkan-memory-trace.sh",
+        "tests/test_carla_gb10_runtime.py"
+      ],
+      "validation": [
+        "Back-to-back GB10 validation and baseline runs no longer fail in preflight",
+        "Ports with an active listener still fail the preflight",
+        "Full local regression: 696 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "Only the preflight socket option changed; the probes still assume exclusive use of the requested port range."
+    },
+    {
+      "id": "carla-driver-call-serialization-scope",
+      "category": "vulkan-diagnostics",
+      "change": "Add CARLA_GB10_SERIALIZE_DRIVER_CALLS / -CarlaVulkanSerializeDriverCalls, a shared driver-call lock that joins graphics/compute pipeline creation with vkCreateShaderModule, vkCreatePipelineLayout, vkCreateDescriptorSetLayout, vkMergePipelineCaches, vkGetPipelineCacheData, vkAllocateDescriptorSets and vkUpdateDescriptorSets.",
+      "reason": "Audit 9.74 explained the validation layer's effect as serialization of the driver call stream. That explanation is only testable by moving the same serialization into the RHI without the layer, which also separates it from validation, timing and memory-layout effects.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanResources.h",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipeline.cpp",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanShaders.cpp",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanDescriptorSets.cpp",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanRHI.cpp",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPendingState.cpp",
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanPipelineState.cpp",
+        "scripts/carla/probe-town10-gb10-runtime.sh",
+        "Makefile",
+        "tests/test_carla_gb10_runtime.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "ARM64 Development rebuilds carla-ue-20261001T044114Z-6hyoAk and carla-ue-20261001T044514Z-p9BhJl compile Module.VulkanRHI and relink CarlaUnreal",
+        "Diagnostic binary staged by hash: 6acec2a3 to bebd701e, then cb734133 after the coverage extension; assets and shader cache unchanged",
+        "Round 1 (no descriptor alloc/update): baseline town10-gb10-rpc-20261001T044409Z-Ptfd6h FAIL and serialized 20261001T044425Z-47jylw FAIL, same libnvidia-glvkspirv.so.580.173.02 SIGSEGV",
+        "Round 2 (all covered entry points): baseline town10-gb10-rpc-20261001T044745Z-izx6GL FAIL and serialized 20261001T044802Z-EL7gKC FAIL, same SIGSEGV",
+        "Serialization was active in both test runs: -CarlaVulkanSerializeDriverCalls in server-command.json and one 'serializing instrumented Vulkan driver calls' line in server.log",
+        "Full local regression: 696 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "Negative result only: the GB10 crash does not depend on concurrency between the instrumented entry points, so the 9.74 serialization explanation is refuted and the validation layer's protection must come from its checks, the instance/device creation chain, timing or memory-layout perturbation. This is not a fix; the shipping build carries empty no-op call sites and the product gate remains BLOCKED."
+    },
+    {
+      "id": "gb10-client-abort-archive-and-debug-utils-mode",
+      "category": "harness",
+      "change": "Archive the client's own UE log as client-ue.log, report a Client abort reason (none, device-creation, shader-compiler-sigsegv) in decision.md, include 'Cannot create a Vulkan device' in the diagnostics grep, and add the opt-in CARLA_RUNTIME_VULKAN_DEBUG_UTILS mode that passes -vulkandebugutils without the validation layer.",
+      "reason": "The probe only archived process stdout, so an early abort inside FVulkanDevice::InitGPU was indistinguishable from the known shader compiler crash: UE logs the reason to Saved/Logs/CarlaUnreal.log and exits through RequestExit(1) before stdout is flushed. The debug-utils mode isolates the only other side effect of -vulkanvalidation besides loading the layer, because GRHIIsDebugLayerEnabled has no other user in the engine.",
+      "paths": [
+        "scripts/carla/probe-town10-gb10-runtime.sh",
+        "Makefile",
+        "tests/test_carla_gb10_runtime.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Verified with town10-gb10-rpc-20261001T052015Z-jmBnTr: decision.md now reports 'Client abort: device-creation' and server-diagnostics.txt carries the UE message",
+        "Control, -vulkandebugutils and validation runs after 04:48 all exit with server-stop-code 1 and the same 'Cannot create a Vulkan device' reason",
+        "The staged binary is unchanged (sha256 cb734133) and vulkaninfo still creates a minimal device 5/5 in the same container, so the device-creation rejection is environmental rather than a code change",
+        "Full local regression: 697 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "The debug-utils comparison and the 9.74 validation result are not re-verified while vkCreateDevice is being rejected: any run reporting Client abort device-creation must not be attributed to the product shader path. Re-running the three configurations once device creation recovers is still outstanding."
+    },
+    {
+      "id": "gb10-vulkan-diagnostic-comparison-entry",
+      "category": "harness",
+      "change": "Add scripts/carla/compare_gb10_vulkan_diagnostics.py and the carla-gb10-vulkan-comparison make target: run the GB10 Town10 gate once per Vulkan diagnostic configuration in a fixed order, classify each result as PASS/FAIL/BLOCKED, leave the remaining configurations NOT-RUN when the control run is blocked, and write comparison.json plus summary.md with the client binary hash.",
+      "reason": "Audit 9.75 and 9.76 need the same four configurations re-run repeatedly, and 9.76 showed that a vkCreateDevice rejection is indistinguishable from a product result unless the decision fields are classified explicitly. Running the control first also stops the tool from spending three runs in a degraded environment.",
+      "paths": [
+        "scripts/carla/compare_gb10_vulkan_diagnostics.py",
+        "Makefile",
+        "tests/test_carla_gb10_vulkan_comparison.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "make carla-gb10-vulkan-comparison reports control=BLOCKED (device-creation) and debug-utils/validation/serialize-driver-calls=NOT-RUN in artifacts/gb10-vulkan-comparison/20261001T084719Z",
+        "Comparison exits 3 unless overall is COMPARABLE and refuses to call a blocked control a product result",
+        "Report records the staged client binary sha256 cb734133 and each configuration's make variables and run directory",
+        "13 new unit tests cover classification, the control-must-reproduce rule, container-to-host path mapping and make wiring",
+        "Full local regression: 711 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "The comparison tool only orchestrates and classifies existing gate runs; it does not make the gate itself pass, does not decide whether the validation layer truly protects the product path, and its COMPARABLE verdict is a prerequisite for interpretation rather than evidence about the NVIDIA compiler crash."
+    },
+    {
+      "id": "gb10-vulkan-four-configuration-result",
+      "category": "vulkan-diagnostics",
+      "change": "Run the four-configuration comparison after device creation recovered and split the probe's Client abort field into device-creation, shader-compiler-sigsegv, nvidia-driver-sigsegv and none.",
+      "reason": "Audit 9.74 claimed the validation layer turned the gate from FAIL into PASS, 9.75 refuted the serialization explanation and 9.76 could not re-check anything while vkCreateDevice was being rejected. The comparison is the first run that could test all four configurations back to back on one binary.",
+      "paths": [
+        "scripts/carla/compare_gb10_vulkan_diagnostics.py",
+        "scripts/carla/probe-town10-gb10-runtime.sh",
+        "tests/test_carla_gb10_runtime.py",
+        "tests/test_carla_gb10_vulkan_comparison.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "artifacts/gb10-vulkan-comparison/20261001T084821Z/: control FAIL, debug-utils FAIL, validation FAIL, serialize-driver-calls FAIL, all with server stop code 139",
+        "control town10-gb10-rpc-20261001T084822Z-lFzW5u, debug-utils 20261001T084837Z-DaTdj2 and serialize-driver-calls 20261001T084916Z-YvKrF2 crash in libnvidia-glvkspirv",
+        "validation town10-gb10-rpc-20261001T084853Z-YC9sIh loads the layer (-vulkanvalidation=1, layer listed by vulkaninfo, 12 Validation Errors) and still crashes, in libnvidia-eglcore instead",
+        "Staged client binary is unchanged at sha256 cb734133, the same binary that produced the 9.74 PASS and the 9.75 crash pairing",
+        "Full local regression: 712 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "One run per configuration: enough to refute a stable validation-layer PASS and to reject the debug-utils explanation, but not enough to prove that the eglcore and glvkspirv crashes share a root cause or to make the product gate pass. Town10/RGB/LiDAR acceptance remains BLOCKED."
+    },
+    {
+      "id": "gb10-client-crash-symbolization",
+      "category": "vulkan-diagnostics",
+      "change": "Add scripts/carla/symbolize_client_crash.py and the carla-symbolize-client-crash make target, which symbolize the CarlaUnreal frames of a crashed GB10 run with CarlaUnreal.debug and llvm-symbolizer and write symbolized-crash.txt next to the client log.",
+      "reason": "The staged client is built with -NoDumpSyms, so every crash frame reads UnknownFunction and the earlier audits could not tell the baseline crash apart from the relocated one seen with the validation layer. UE prints the absolute program counter first and a module-relative offset in parentheses; only the first value matches the debug binary, and only the frames after the Critical error marker are the crash stack.",
+      "paths": [
+        "scripts/carla/symbolize_client_crash.py",
+        "Makefile",
+        "tests/test_carla_crash_symbolizer.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Control run town10-gb10-rpc-20261001T090835Z-1DcLyl resolves to FVulkanPipelineStateCacheManager::CreateComputePipelineFromShader on a FCompilePipelineStateTask worker with libnvidia-glvkspirv as the crash site",
+        "Validation run town10-gb10-rpc-20261001T090849Z-rJsZfI resolves to VulkanRHI::CheckDeviceFault below VerifyVulkanResult and WaitForFence, preceded by LogVulkanRHI Error: Result failed, VkResult=-4 (VK_ERROR_DEVICE_LOST), with libnvidia-eglcore as the crash site",
+        "The baseline run has no VkResult failure before the crash, so the two crashes are the same driver fault observed at different points",
+        "Variance over three extra control+validation rounds: control 5/5 FAIL, validation 4/4 FAIL, so the audit 9.74 PASS never reappeared",
+        "Validation output also contains real, version-independent VUID violations (VUID-vkCmdDraw-None-02699 descriptor never updated, stage masks using MESH/TASK shader bits without the features)",
+        "9 symbolizer unit tests plus full local regression: 721 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "Symbolization identifies call sites, not causes: it does not prove that the descriptor misuse causes the device loss or the compiler crash, and the validation layer itself perturbs timing. The comparison remains a diagnostic-only path and the product gate stays BLOCKED."
+    },
+    {
+      "id": "gb10-driver-evidence-bundle",
+      "category": "vulkan-diagnostics",
+      "change": "Add scripts/carla/collect_gb10_driver_report.py and the carla-gb10-driver-report make target, which assemble a vendor-escalation bundle from existing run directories: environment and driver version, per-run verdict and client abort, symbolized crash stacks, validation findings, the documented negative results and an explicit missing-evidence list.",
+      "reason": "Every UE-side contrast has been exhausted (audit 9.75-9.79), so the next step is a self-contained report a driver engineer can act on. Deriving it from the artifact tree instead of writing it by hand keeps it from drifting away from the runs it cites, and listing missing evidence prevents an incomplete bundle from looking complete.",
+      "paths": [
+        "scripts/carla/collect_gb10_driver_report.py",
+        "Makefile",
+        "tests/test_carla_driver_report.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "make carla-gb10-driver-report RUN_DIRS=\"<six run dirs>\" produced artifacts/gb10-driver-report/20261001T091726Z with missing=none",
+        "Report records driver 580.173.02, staged client sha256 cb734133, the two PASS reference runs, both symbolized crash stacks (glvkspirv and eglcore) and the six already-excluded results",
+        "Draw-time descriptor violations appear in 4/4 failing validation runs and 0/2 passing ones, always binding #0 index 0 via vkCmdDraw and vkCmdDrawIndexed",
+        "8 generator unit tests plus full local regression: 729 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "The bundle collects and formats evidence only; it does not establish the root cause, does not prove the descriptor violation is related to the compiler crash, and does not change the product gate, which remains BLOCKED."
+    },
+    {
+      "id": "gb10-validation-call-site-stack-trace",
+      "category": "vulkan-diagnostics",
+      "change": "Add the opt-in -CarlaVulkanValidationStackTrace=<substring> switch, which makes UE's Vulkan debug messenger dump the caller of every matching validation message on the calling thread, add CARLA_RUNTIME_VULKAN_VALIDATION_STACK_TRACE to the GB10 probe, and add the validation-call-site mode to the crash symbolizer for UE's StackWalkAndDump log format.",
+      "reason": "VUID-vkCmdDraw(Indexed)-None-02699 only names a descriptor set, and the unique-message filter in the same callback suppresses all but the first occurrence, so the earlier audit could not tell whether the violation was one broken path or a systemic binding pattern.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/VulkanRHI/Private/VulkanDebug.cpp",
+        "scripts/carla/probe-town10-gb10-runtime.sh",
+        "scripts/carla/symbolize_client_crash.py",
+        "Makefile",
+        "tests/test_carla_gb10_runtime.py",
+        "tests/test_carla_crash_symbolizer.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Run town10-gb10-rpc-20261001T121623Z-lCKbre captured 5723 call sites: 5574 vkCmdDrawIndexed and 149 vkCmdDraw",
+        "First call site resolves to FVulkanCommandListContext::RHIDrawIndexedPrimitive (VulkanCommands.cpp:736) on the RHI thread, so the violation is in the generic RHI draw path rather than Carla code",
+        "Only two distinct descriptor set handles (0x6373, 0x63de) appear after the layer's unique-message filter, so the same pair of sets is reused across nearly every draw",
+        "Descriptor lead downgraded: a violation on 97% of draws would fail on any driver and cannot explain the host-side compiler SIGSEGV, so it is more likely a UE binding pattern the 1.3.204 layer mis-tracks; a Lavapipe contrast is required before further investment",
+        "Full local regression: 734 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "The switch only attributes a validation message to a call site; it does not establish causality, does not make the descriptor violation benign or harmful, and the GB10 gate remains BLOCKED."
+    },
+    {
+      "id": "carla-client-input-settings-class-resolution",
+      "category": "cook-runtime",
+      "change": "Point Unreal/CarlaUnreal/Config/DefaultInput.ini at /Script/Engine.PlayerInput and /Script/Engine.InputComponent instead of the EnhancedInput classes, and add tests that pin the client config to the plugin set the project actually mounts.",
+      "reason": "CarlaUnreal.uproject sets DisableEnginePluginsByDefault, so FPlugin::IsEnabledByDefault only enables engine plugins listed in the project; EnhancedInput is not listed and its descriptor requires DataValidation, which lives under Engine/Plugins/Editor and cannot ship in a runtime build. The EnhancedInput soft class paths therefore never resolve, UInputSettings::GetDefaultPlayerInputClass/GetDefaultInputComponentClass fail their Class.IsValid() ensure twice per run and silently fall back to the engine classes.",
+      "paths": [
+        "third_party/carla/Unreal/CarlaUnreal/Config/DefaultInput.ini",
+        "tests/test_carla_client_config.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Runtime plugin mounts match the .uproject list exactly (ChaosVehiclesPlugin, OnlineBase, OnlineServices, OnlineSubsystem, OnlineSubsystemUtils, ProceduralMeshComponent, SunPosition)",
+        "Adding EnhancedInput to the .uproject fails with 'Unable to load plugin EnhancedInput ... The missing dependency is DataValidation', and DataValidation only exists under Engine/Plugins/Editor",
+        "NullRHI gate Class.IsValid occurrences drop from 4 to 0 with no InputSettings.cpp errors (town10-nullrhi-rpc-20261001T144610Z-iv3gBd), gate still PASS",
+        "Carla plugin sources contain no EnhancedInput references and the same file already uses legacy +AxisMappings, so no behaviour is removed",
+        "Full local regression: 736 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "The fix removes the ensure and makes the config consistent with the mounted plugin set; it does not enable EnhancedInput, which would require shipping an editor-only plugin dependency. The FCoreRedirects IsInGameThread ensure and the unlocated 'image-layout warning' item remain open, and a clean re-cook is still required to show the config change flowing through a fresh stage."
+    },
+    {
+      "id": "carla-material-serialize-log-gate",
+      "category": "diagnostic",
+      "change": "Gate the two UMaterial::Serialize archive-offset probes behind an opt-in switch (carla.LogMaterialSerialize CVar plus -CarlaLogMaterialSerialize on the command line) instead of logging them unconditionally at Warning level, and add static regression tests that keep the gate in place.",
+      "reason": "The probes were added on 2026-09-21 in fork commit 85a04a40b while diagnosing cooked material stream offsets and were committed together with the editor-only guard fix. They fired once per loaded material and produced 239 of the 248 Warning lines in a single NullRHI gate run, burying the gate log that every other finding is read against.",
+      "paths": [
+        "third_party/unreal-engine/Engine/Source/Runtime/Engine/Private/Materials/Material.cpp",
+        "tests/test_carla_engine_log_hygiene.py",
+        "docs/carla-dgx-audit.md",
+        "docs/carla-dgx-todo.md"
+      ],
+      "validation": [
+        "tests/test_carla_engine_log_hygiene.py (5 tests): both probes still present, each UE_LOG guarded within 4 lines of the gate, gate default 0, both switches reachable, the three added includes declared",
+        "make carla-ue-build PASS (artifacts/carla/carla-ue-20261002T015920Z-LEqwrd, 119 s incremental); the built binary carries carla.LogMaterialSerialize and CarlaLogMaterialSerialize as UTF-16 literals alongside the retained probe strings (Linux TEXT() is UTF-16, so ASCII grep and strings find nothing)",
+        "Runtime A/B on the NullRHI gate with the same stage and the binary swapped: Warning lines 248 -> 8 and Material::Serialize 239 -> 0 (d561f54e pre, a53f37d7 post), Endpoint PASS both times",
+        "Full local regression: 741 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "A log gate, not a root-cause fix. The runtime A/B swapped only the binary in the staged client rather than re-running a full cook and stage, so the stage is no longer derived from a single cook; the previous binary is preserved at artifacts/carla/ue-binary-backup-20261002T020304Z/ and the pre-change run records the same sha256, so the before measurement stays checkable. The probes are deliberately kept rather than deleted because they remain the only same-run evidence for the material tell offsets; the remaining 8 warnings are unrelated families and the single ensure is the known engine-side one from 9.84."
+    },
+    {
+      "id": "carla-fork-provenance-derivation",
+      "category": "reproducibility",
+      "change": "Add scripts/carla/report_fork_provenance.py plus make carla-fork-provenance and carla-fork-provenance-verify, derive the fork identity from HEAD together with the tracked working-tree delta, and reinstall the runtime provenance the probes consume so it names the code that actually produced the staged binaries. The generated record it corrects is written to artifacts/carla/cooked-server-full/runtime-provenance.json, which is not tracked.",
+      "reason": "The recorded /artifacts/carla/cooked-server-full/runtime-provenance.json named carla revision aba1bb69 while the tree stood at b56ce1a3, so every archived NullRHI and GB10 run carried a provenance that pointed at a commit which never produced that binary. The Unreal revision happened to match HEAD but its tree carries 92 tracked modifications, which a 40-hex commit cannot express at all. The pin-based preflights (g0-probe CARLA_SOURCE_COMMIT/CARLA_UE_COMMIT, ue-setup git diff --quiet HEAD) no longer match reality either.",
+      "paths": [
+        "scripts/carla/report_fork_provenance.py",
+        "tests/test_carla_fork_provenance.py",
+        "Makefile",
+        "docs/carla-dgx-audit.md",
+        "docs/carla-dgx-todo.md"
+      ],
+      "validation": [
+        "report_fork_provenance.py --verify on the previous recording reports DRIFT carla.revision and exits 1",
+        "After reinstalling, --verify reports PASS provenance-verified",
+        "Host-side and container-side derivations agree on tracked_diff_sha256 for both forks",
+        "make carla-town10-nullrhi-rpc still PASSes end to end; the run snapshot endpoint/runtime-checks-*/provenance.json carries the new fields and inputs.sha256 matches the live file hash",
+        "tests/test_carla_fork_provenance.py: 17 tests covering derive, delta detection, untracked counting, detached HEAD, schema validation, and drift reporting",
+        "Full local regression: 758 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "This makes the recorded provenance faithful, not reproducible. The toolchain image was not rebuilt, and the fork deltas still live as uncommitted working-tree modifications (carla 1, Unreal 92) rather than commits or patches, so the recording describes the state it found. The bootstrap pins consumed by g0-probe and ue-setup are documented as mismatched but deliberately left alone, because changing them first requires deciding whether the fork deltas get committed or regenerated from scripts/carla/patches."
+    },
+    {
+      "id": "carla-scratch-tmp-removal",
+      "category": "reproducibility",
+      "change": "Archive the evidence held in the untracked scratch directory .codex-tmp/, repoint the audit 9.27 reference at the archive, delete the directory, and add tests/test_carla_scratch_hygiene.py so the build manifest precondition is asserted instead of rediscovered. The archived copy lives at artifacts/codex-tmp-archive/20261002T090908Z/, which is not tracked.",
+      "reason": "make carla-manifest had been failing with 'not a regular file: /repo/.codex-tmp/cooked-server-test/CarlaUnreal/Config': capture_build_manifest.py can only replay a tree whose non-ignored untracked entries are regular files, and .codex-tmp/ (2.2 GB, 3822 entries) contained nine symlinks into shared engine and content trees. It also held the only copy of a log cited by audit 9.27, so it could not simply be deleted.",
+      "paths": [
+        "tests/test_carla_scratch_hygiene.py",
+        "docs/carla-dgx-audit.md",
+        "docs/carla-dgx-todo.md"
+      ],
+      "validation": [
+        "Before: make carla-manifest FAIL with manifest.errors = ['not a regular file: /repo/.codex-tmp/cooked-server-test/CarlaUnreal/Config'] (build-manifests/20261002T090824Z-1bcba7f4832e)",
+        "After: non-ignored untracked entries 2690 -> 60 and non-regular ones 9 -> 0",
+        "After: make carla-manifest PASS (build-manifests/20261002T091006Z-74444f371d46) and make carla-manifest-verify PASS",
+        "tests/test_carla_scratch_hygiene.py asserts the precondition directly and checks the listing is non-empty so the assertion cannot go vacuous",
+        "Full local regression: 760 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "The removal makes the capture completable, not the rebuild clean. The toolchain image was not rebuilt, the fork deltas remain uncommitted, and a manifest only proves the recorded inputs still agree at verify time; it is not a fresh clone and says nothing about Editor, cook, RPC or sensor results. Only scratch copies were deleted: the two staged cooked-server trees can be regenerated from a cook plus scripts/carla/stage-arm64-cooked-server.sh, and the canonical stage remains artifacts/carla/cooked-server-full/."
+    },
+    {
+      "id": "carla-image-build-context-filter",
+      "category": "reproducibility",
+      "change": "Add a repository-root .dockerignore that denies the whole tree and re-allows only the files the Dockerfiles actually read from the build context, and add tests/test_carla_image_context.py to keep every Dockerfile input included.",
+      "reason": "There was no .dockerignore, so the build context was the entire working tree - about 966 GB of artifacts, datasets, engine checkouts and third-party sources - and docker build could not start. That is why the toolchain image in use was built 2026-09-14 while images/carla-arm64/Dockerfile had already moved on by 2026-09-25 and carried further uncommitted edits; nothing could rebuild it.",
+      "paths": [
+        ".dockerignore",
+        "tests/test_carla_image_context.py",
+        "docs/carla-dgx-audit.md",
+        "docs/carla-dgx-todo.md"
+      ],
+      "validation": [
+        "Before: du -sh --exclude=.git . reports 966G, and no .dockerignore exists",
+        "After: the build log shows '[internal] load build context' DONE 0.0s",
+        "Scan of all four Dockerfiles: only images/carla-arm64 (scripts/carla/g0-probe.sh) and images/dataset-converter (scripts/dataset-converter/convert.py) read the context; allowing only the CARLA input would have broken the dataset converter image",
+        "tests/test_carla_image_context.py: first rule is '*', every Dockerfile context input is included, the input set is pinned, heavy trees are excluded, and only scripts/ and images/ are included at top level",
+        "Clean --no-cache build completes in 24m31s with exit 0 and produces my-ad/carla-toolchain:arm64-clean-20261002 (sha256:6dd61c0c..., 2.87 GB), whose COPY scripts/carla/g0-probe.sh step succeeds in 0.1s",
+        "Image comparison against the in-use 2026-09-14 build: identical cmake 3.28.3, clang-18 18.1.8, dotnet 8.0.425 and python 3.10.12, plus glslang-tools which the older image was missing although the Dockerfile already listed it",
+        "Smoke: CARLA_TOOLCHAIN_IMAGE=my-ad/carla-toolchain:arm64-clean-20261002 make carla-ue-build PASSes with 20/20 actions including the lld link, forced by touching Material.cpp (mtime only, fork digests unchanged afterwards)",
+        "Full local regression: 768 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "This makes a clean build start and finish, and proves the rebuilt toolchain can still build CarlaUnreal. It does not switch the default tag: the image in use is still the 2026-09-14 build, so every artifact recorded before this change was produced by a toolchain that no Dockerfile revision describes, and that relation stays unproven. Deciding whether to adopt the clean image goes with deciding whether to rebuild the artifacts that were made with the old one."
+    },
+    {
+      "id": "carla-manifest-toolchain-image-binding",
+      "category": "reproducibility",
+      "change": "Bump capture_build_manifest.py to schema 3 and add a required toolchain_image record holding the image reference and the resolved image ID; capture and verify both receive it from the Makefile via docker image inspect, and verify fails when the resolved ID changes.",
+      "reason": "A manifest recorded environment variables but no image identity, so it could not answer which toolchain produced it - the gap that let an 2026-09-14 image sit behind a 2026-09-25 Dockerfile unnoticed. A tag is mutable, so the resolved ID is what has to be pinned.",
+      "paths": [
+        "scripts/carla/capture_build_manifest.py",
+        "tests/test_carla_build_manifest.py",
+        "Makefile",
+        "docs/carla-build-manifest.md"
+      ],
+      "validation": [
+        "scripts/carla/capture_build_manifest.py runs inside the container and therefore cannot inspect Docker itself; the Makefile resolves CARLA_TOOLCHAIN_IMAGE_ID from the host",
+        "New tests: a declared image is recorded and verifies, a changed image ID fails verify with 'toolchain image changed', a retagged image still verifies, and an undeclared image is recorded as explicit empty strings",
+        "tests/test_carla_build_manifest.py: 25 tests pass after the schema bump",
+        "Full local regression: 768 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "The recorded ID is caller-supplied, because a container cannot introspect the image it runs in; verify proves consistency between capture and verification, not that the capture reported honestly. Only the resolved ID is compared - a tag is a pointer that legitimately moves, and comparing it made an honest manifest unverifiable the first time the default tag was repointed. Schema 1 and 2 manifests are no longer accepted by verify and stay as historical artifacts, following the earlier schema 1 to 2 migration. The ID binds the image, not the build products made with it."
+    },
+    {
+      "id": "carla-toolchain-image-adoption",
+      "category": "reproducibility",
+      "change": "Point the default my-ad/carla-toolchain:arm64 tag at the cleanly rebuilt image (sha256:6dd61c0c) and keep the superseded 2026-09-14 image under my-ad/carla-toolchain:arm64-inuse-20260914 (sha256:3f9109bb).",
+      "reason": "Until now the default toolchain was a 2026-09-14 image that no Dockerfile revision describes and that could not be rebuilt, so every new artifact would have been produced by an unreproducible toolchain while a reproducible one sat unused under a separate tag.",
+      "paths": [
+        "docs/carla-dgx-audit.md",
+        "docs/carla-dgx-todo.md"
+      ],
+      "validation": [
+        "Same NullRHI gate under the clean image reproduces the profile exactly: 8 Warning lines (Setting 6, OSS 1, Failed 1), 0 Material::Serialize, 1 ensure, 0 Class.IsValid, stop code 143, Endpoint PASS",
+        "Identical tool versions: cmake 3.28.3, clang-18 18.1.8, dotnet 8.0.425, python3 3.10.12",
+        "Bit-identical build output: forcing a recompile of Material.cpp and relinking with the clean image yields CarlaUnreal sha256 a53f37d7..., the same as the old-image build and the staged copy",
+        "compose resolves my-ad/carla-toolchain:arm64 to sha256:6dd61c0c... without any override"
+      ],
+      "boundary": "This is a machine state change, not a repository change: the compose default still names the tag, so a fresh clone gets whichever image that tag points at locally. The bit-identical evidence is for an incremental recompile plus relink, not a from-scratch build, and the GPU path could not be exercised because the GB10 gate is blocked on the host driver. Manifests captured before the switch record the old image ID and therefore fail verify unless CARLA_TOOLCHAIN_IMAGE names arm64-inuse-20260914."
+    },
+    {
+      "id": "carla-fork-delta-freeze",
+      "category": "reproducibility",
+      "change": "Add scripts/carla/freeze_fork_delta.py with make carla-fork-delta and carla-fork-delta-verify, freeze each fork's uncommitted tracked delta into scripts/carla/patches/fork-working-tree-delta-{carla,ue}.patch, align report_fork_provenance.py's diff invocation with capture_build_manifest.py, and document the two kinds of patch in the patches directory.",
+      "reason": "The forks carry uncommitted tracked modifications that the staged binaries are built from, and 83 of the 92 modified Unreal files were named by no patch in the repository. The manifest could replay them, but its copy lives under artifacts/ and is point-in-time, so a fresh checkout at the recorded HEAD did not reproduce the tree.",
+      "paths": [
+        "scripts/carla/freeze_fork_delta.py",
+        "tests/test_carla_fork_delta.py",
+        "scripts/carla/patches/fork-working-tree-delta-carla.patch",
+        "scripts/carla/patches/fork-working-tree-delta-ue.patch",
+        "scripts/carla/patches/README.md",
+        "scripts/carla/report_fork_provenance.py",
+        "Makefile"
+      ],
+      "validation": [
+        "Frozen carla delta: 1 file, 838 bytes, sha256 7493c747c48e2a7c; frozen ue delta: 92 files, 197343 bytes, sha256 cc17c89b52b60710",
+        "Both digests equal the tracked_diff.sha256 in the build manifest and the tracked_diff_sha256 in runtime-provenance.json, so all three records now mean the same thing",
+        "make carla-fork-delta-verify PASSes, and a later edit to either tree makes it report DRIFT and exit non-zero",
+        "Aligning report_fork_provenance.py to 'git diff --binary HEAD' left both digests unchanged and the installed runtime provenance still verifies",
+        "New tests: 11 in tests/test_carla_fork_delta.py including a cross-tool digest check and a binary-content round trip",
+        "Full local regression: 780 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "This writes the fact down, it does not commit it. HEAD is untouched, nothing was committed or pushed, the working trees are still dirty, and ue-setup's clean-tree assertion still fails. The frozen patches are not applied by any script, and they go stale as soon as the trees change, which is what verify exists to catch. Only tracked modifications are frozen; untracked files are covered by the manifest snapshot instead."
+    },
+    {
+      "id": "carla-nullrhi-stop-path",
+      "category": "harness",
+      "change": "Launch the NullRHI probe's server with exec so server_pid is the server, signal it directly and wait for it to exit (CARLA_NULLRHI_STOP_GRACE, default 20) before SIGKILL, keep the wall-clock guard as an explicit watchdog, and add a Shutdown classification to decision.md.",
+      "reason": "The server ran under `timeout --signal=INT --kill-after=10` and finish signalled timeout's pid, but GNU timeout does not forward a SIGTERM it receives to its child (measured: after killing the wrapper the child was still alive). The server was orphaned, the container runtime then SIGKILLed it, no signal ever reached UE, the log ended mid-write and the recorded Server stop code described the wrapper rather than the server.",
+      "paths": [
+        "scripts/carla/probe-town10-nullrhi-rpc.sh",
+        "tests/test_carla_runtime_probes.py",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "Measured that GNU timeout does not forward a received SIGTERM: after kill -TERM on the wrapper, the child was still alive and the wrapper exited 143",
+        "With the fix, the server receives the signal and runs its exit sequence: LogExit lines appear in the run log",
+        "Shutdown classification reproduces across runs: stock and opt-in both report Shutdown: crashed with stop code 139",
+        "tests/test_carla_runtime_probes.py: 33 tests pass, now asserting exec, the direct-signal waiting loop and the classification",
+        "Reverting a trial engine change rebuilt a byte-identical binary (BuildID 377825d7..., sha a53f37d7...)"
+      ],
+      "boundary": "The stop-path fix is verified only on the NullRHI gate; the GB10 path could not be re-run. The Shutdown field is best effort: the status is exact but ambiguous, because UE's graceful handler exits with 128+signal and so does an unhandled kill, and the log that separates them is truncated mid-write by the very crash under investigation, so the status takes precedence and the log only upgrades the verdict. A trial engine change that installed the Unix termination handler was reverted: it produced no observable difference and an unproven engine divergence is worse than none. The shutdown crash itself is located but not fixed: RemoveHandler is reached only from FSocket::Reset (a move-only type, so no double unregister by copy), the registrars are the LightGrid, Nanite and VirtualShadowMap status-feedback sockets, and the log shows the check failure triggering UE's forced exit immediately before the SIGSEGV, so the signal is likely a by-product of that path rather than evidence of memory corruption in GPU messaging."
+    },
+    {
+      "id": "carla-ue-shutdown-crash-probe",
+      "category": "harness",
+      "change": "Add probe-ue-shutdown-crash.sh, dump-ue-shutdown.gdb, gdb_ue_shutdown_capture.py and analyze_ue_shutdown_capture.py plus `make carla-ue-shutdown-crash` to capture the first failed check on the NullRHI shutdown path. The inferior is discovered through /proc/<gdb pid>/task/*/children and verified against the binary's exe target before any signal is sent, shutdown is requested with SIGTERM to the inferior once the RPC world answers, and the capture records the check hook, the socket register/remove ledger, the handler map state and the ABI argument registers. It also instruments both release paths (GPUMessage::FSystem::ReleaseRHI and Nanite::FGlobalResources::ReleaseRHI) and stamps a single monotonic `order` on every observation, with the handler map's size recorded at each one, so the run reads as one timeline. It also marks the exit boundary (a breakpoint on exit, kept pending because libc is not mapped when the breakpoints are created) so each release can be attributed to a teardown phase, and reports release_phases next to the ordered timeline.",
+      "reason": "The shutdown crash at GPUMessaging.cpp:68 had never been caught in the act: the log stops at Signal 11, core files go to an apport helper that is absent in the container, and two hand-run gdb attempts failed (pgrep -f matched the probe's own command line and killed PID 1; `break FSystem::RemoveHandler` does not resolve because the class lives in namespace GPUMessage). A write watchpoint on GPUMessage::GSystem.MessageHandlers.Pairs.Elements.Data.ArrayNum fires twice: at the registration the map goes 0->1 from TMapBase::Emplace, and at order 5 it goes 1->0 from ~TMapBase <- GPUMessage::FSystem::~FSystem on libc's exit() static-destruction path, three observations before the failed check at order 8. Nanite::FGlobalResources::ReleaseRHI then runs delete FeedbackManager (NaniteShared.cpp:309), so ~FSocket -> FSocket::Reset -> RemoveHandler(0) asserts against a destroyed map and the following TMap::Remove touches freed storage. Under gdb the same run ends with no signal at all and exit 143, confirming that the wild 139 comes from the non-debugger fatal path. The release instrumentation settled an open question: FSystem::ReleaseRHI runs at order 5 while the map still holds its one handler, so it passes cleanly and does not clear the map, while Nanite's ReleaseRHI runs at order 7 with the map already empty. Both enter from FRenderResource::ReleaseResource; the caller of that function is still unmeasured because gdb's unwind stops at that frame in this build. The exit marker attributed both releases to inside-exit-handlers, so neither is an explicit release during RHI shutdown: the defect is purely the relative order of the two TGlobalResource destructors, whose destructor body calls the release before the resource's members are destroyed (RenderResource.h:568). That also corrected an earlier draft inference in the report, which had read the release-before-members order as evidence of an explicit call. Installing the marker exposed an instrument defect as well: the installer deleted any breakpoint that did not resolve at creation, which is right for the binary's own symbols but silently dropped a libc symbol; such roles now stay pending and their binding is read back after the run.",
+      "paths": [
+        "scripts/carla/probe-ue-shutdown-crash.sh",
+        "scripts/carla/dump-ue-shutdown.gdb",
+        "scripts/carla/gdb_ue_shutdown_capture.py",
+        "scripts/carla/analyze_ue_shutdown_capture.py",
+        "tests/test_carla_ue_shutdown.py",
+        "Makefile",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "make carla-ue-shutdown-crash (PASS, CAPTURED_TARGET_ASSERT, map write 1->0 at order 7 vs check order 11)",
+        "ordered timeline shows exit at order 5, then release-gsystem (6), the map write (7) and release-nanite (8)",
+        "release_phases reports both releases as inside-exit-handlers",
+        "23 shutdown capture tests including pending-role retention and release phase reporting",
+        "python3 -m unittest discover -s tests (817 tests, 0 failures)",
+        "make test-local"
+      ],
+      "boundary": "A debugger makes FPlatformMisc::IsDebuggerPresent() true, so CheckVerifyFailedImpl2 skips AssertFailedImplV and the caller runs PLATFORM_BREAK() instead of the fatal path. This capture is evidence about the failed invariant, its id, its caller and the ordering of the map destruction, not about the exit status; it says nothing about the exit code 139 recorded on stock runs. The probe has been exercised on NullRHI only, and no engine-side fix has been made: making FSocket::Reset() tolerate a released manager, or giving GSystem a longer lifetime, is an upstream decision that would affect every GPU message user."
+    },
+    {
+      "id": "carla-compose-run-security-opt",
+      "category": "harness",
+      "change": "Drop `--security-opt seccomp=unconfined` from every `docker compose run` invocation that starts a debugger, keeping `--cap-add SYS_PTRACE`.",
+      "reason": "docker compose v5.0.2 `run` has no --security-opt flag, so carla-ue-vulkan-device-state, -gpu, carla-ue-vulkan-pipeline and carla-ue-vulkan-fault-gpu all exited with `unknown flag: --security-opt` before the container started. CAP_SYS_PTRACE alone was measured sufficient: with CapEff bit 19 set, gdb set a breakpoint on and ran a test binary under the default seccomp profile.",
+      "paths": [
+        "Makefile",
+        "tests/test_carla_ue_shutdown.py",
+        "tests/test_carla_runtime_probes.py",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "make -n carla-ue-vulkan-device-state (no --security-opt, keeps --cap-add SYS_PTRACE)",
+        "gdb breakpoint and run of a test binary in carla-build with only --cap-add SYS_PTRACE",
+        "python3 -m unittest discover -s tests (797 tests, 0 failures)"
+      ],
+      "boundary": "This restores the debugger targets to start at all; it does not re-verify the GPU evidence those targets produce, which needs GB10 hardware and was not re-run here."
+    },
+    {
+      "id": "ue-gpumessaging-shutdown-guard-proposal",
+      "category": "diagnostics",
+      "change": "Add an unapplied engine patch proposal, scripts/carla/patches/ue-gpumessaging-shutdown-guard.patch, that gives GPUMessage::FSystem a destructor setting bIsBeingDestroyed before its members are destroyed and makes GPUMessage::FSocket::Reset() skip the unregister while that flag is set. It touches one file, adds no includes, and is documented as a third patch category in scripts/carla/patches/README.md. The hand-off form is the bundle under artifacts/ue-gpumessaging-shutdown/20261003T062016Z/ (report.md, COVER-NOTE.md and the capture it cites), which is not tracked.",
+      "reason": "The map write watchpoint showed the handler map going 1->0 at order 5, three observations before the failed check at order 8, with the stack running ~TMapBase <- GPUMessage::FSystem::~FSystem <- libc's exit() static-destruction path. Because both GSystem and Nanite::FGlobalResources are TGlobalResource globals, ~FSocket can run after the manager it unregisters into, so RemoveHandler asserts on a destroyed map and the following TMap::Remove touches freed storage. The proposed guard fixes the shared unregister path for every socket owner without relaxing the assertion itself, which still catches genuine double-unregister bugs. Applying it is an upstream decision that would affect every GPU message user, so it is recorded as a proposal rather than applied.",
+      "paths": [
+        "scripts/carla/patches/ue-gpumessaging-shutdown-guard.patch",
+        "scripts/carla/patches/README.md",
+        "tests/test_carla_ue_shutdown_upstream_proposal.py",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "git -C third_party/unreal-engine apply --check <patch> succeeds (proposal still applies)",
+        "the flag is absent from GPUMessaging.cpp and the file is not in git status (proposal not applied)",
+        "8 proposal tests including single-file blast radius and destructor-ordering shape",
+        "python3 -m unittest discover -s tests (809 tests, 0 failures)",
+        "make test-local"
+      ],
+      "boundary": "The patch is not applied and not compiled: no rebuild has been made, so the claim that the assert and the SIGSEGV disappear is an argument from the measured ordering, not a measured result. It was reproduced on NullRHI only, the FSystem::ReleaseRHI question is unsettled, and the flag's cross-thread visibility is left as a plain bool on purpose."
+    },
+    {
+      "id": "carla-handoff-page",
+      "category": "harness",
+      "change": "Add docs/carla-handoff.md, a decision-queue page that names the three things waiting on a human (send the GB10 vendor bundle, decide where the engine fix lands, decide how fork edits are frozen), what each decision needs, and the steps that do not depend on them. The todo page now points at it; evidence stays in the audit and open work stays in the todo.",
+      "reason": "Both leads were sitting on 'someone must decide', and that queue was spread across the audit and the todo, so a reader had to reconstruct it. A page that duplicates the audit would rot, so it holds only the decisions and is checked for the property that matters: every artifacts/ path it hands out must exist, both bundles must be named, and the no-driver-change constraint has to stay on the page or the vendor bundle reads as 'try another driver'.",
+      "paths": [
+        "docs/carla-handoff.md",
+        "tests/test_carla_handoff.py",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-dgx-audit.md"
+      ],
+      "validation": [
+        "6 handoff tests including artifacts-path existence and the driver constraint",
+        "python3 -m unittest discover -s tests (815 tests, 0 failures)",
+        "make test-local"
+      ],
+      "boundary": "It is a status page, not evidence: it links to the audit and the todo and states no claim of its own. The test count it quotes is a snapshot of this date and is not asserted."
+    },
+    {
+      "id": "gb10-bundle-consistency-check",
+      "category": "diagnostics",
+      "change": "Add tests/test_carla_gb10_bundle.py, which derives every number from the newest bundle's report.json and checks the hand-written prose against it: the run table and status distribution, the crash-stack sections against the recorded frames, the missing-evidence rendering, that every cited run directory still exists, and that the cover note states the run count, the constraint, the three-way ask and the 39-run sweep rather than only the older subset. Correct COVER-NOTE.md and docs/carla-handoff.md where they overstated the evidence. The corrected cover note is artifacts/gb10-driver-report/20261003T052318Z/COVER-NOTE.md, which is not tracked.",
+      "reason": "Reviewing the bundle by eye is how a line count in report.md got relayed as a crash count: 14 glvkspirv and 11 eglcore mentions are frames plus the table's crash-site cells, while the records themselves carry symbolized driver frames for only 2 of the 39 runs. The cover note also implied every record had a crash site and a stack, and its variance bullet quoted only the older subset while the 39-run sweep says something stronger and simpler: with the Khronos validation layer enabled 2 of 10 runs passed, with it disabled 0 of 29. A vendor escalation built on numbers nobody re-derived is worse than no escalation, so the derivation is now a test.",
+      "paths": [
+        "tests/test_carla_gb10_bundle.py",
+        "docs/carla-handoff.md",
+        "docs/carla-dgx-todo.md"
+      ],
+      "validation": [
+        "9 bundle tests including crash-stack section versus recorded frames and run directory traceability",
+        "python3 -m unittest discover -s tests (826 tests, 0 failures)",
+        "make test-local"
+      ],
+      "boundary": "It checks the bundle against its own report.json, so it cannot detect a wrong collection upstream of the JSON, and it validates whichever bundle is newest rather than a fixed one. It also does not re-verify the vendor bundle's physics: the replay discriminator and the excluded list are reported from the earlier measurements, not re-measured here."
     }
   ]
 }
