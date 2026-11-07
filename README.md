@@ -30,6 +30,11 @@ Autoware 在线闭环或 Scenario Simulator。
 它验证对象状态仿真与最小行为克隆工程链路，不替代原始传感器或 Autoware 验收。
 系统学习按[30 天计划](docs/waymax-learning-30-days.md)推进，
 每天在[学习日志](docs/learning/waymax-30-days/README.md)记录操作、证据和结论。
+名词还不熟悉时，先读[入门图解与中英文词表](docs/waymax-concepts-illustrated.md)。
+运行后的结果目录按[文件来源与用途](docs/waymax-files-explained.md)阅读，
+然后看[第一轮 expert 基线讲解](docs/waymax-first-baseline-walkthrough.md)。
+本机结果按[保留与归档规则](docs/waymax-artifact-retention.md)整理，
+当前三个主要结果的入口是 `artifacts/waymax/README.md`。
 
 ## 目录
 

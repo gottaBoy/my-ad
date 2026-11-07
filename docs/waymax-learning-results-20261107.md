@@ -60,7 +60,9 @@ checkpoint SHA256：
 629ee41838ef94933e8d94b546e8a344e512d472d35b57e9789bf9c755f8bfa5
 ```
 
-重复运行对照位于 `artifacts/waymax/repeatability-20261107.json`。
+历史重复运行对照位于 `artifacts/waymax/_archive/repeatability-20261107.json`；
+归档后按新路径重新计算的报告为
+`artifacts/waymax/_archive/repeatability-relocated-20261107.json`。
 这只证明本机、相同输入/配置下两次输出一致，不承诺所有平台数值逐位相同。
 
 ## 为什么不能说“策略已经学会开车”
@@ -92,9 +94,11 @@ checkpoint SHA256：
 AttributeError: module 'jax' has no attribute 'tree_map'
 ```
 
-保留目录：`artifacts/waymax/learning-20261107T104337Z-0dl52ez7/`。
+归档目录：`artifacts/waymax/_archive/learning-20261107T104337Z-0dl52ez7/`。
 选择旁边已经采用 `jax.tree.map` 的标准源码 `waymax-my` 后通过。
 没有临时补 `jax.tree_map` 别名、修改 fork、安装新依赖或覆盖历史图片。
+其它旧结果也只移动到归档，没有删除或重写。
+当前主要结果与迁移对照见[保留规则](waymax-artifact-retention.md)。
 
 ## 重跑顺序
 

@@ -5,16 +5,34 @@
 逐日学习请按[30 天计划](waymax-learning-30-days.md)，
 在[每日进度与日志](learning/waymax-30-days/README.md)记录验证结果。
 
+第一次接触这些名词，先看
+[入门图解与中英文词表](waymax-concepts-illustrated.md)。
+它从一个假设的交通例子解释各组件的分工，并区分教学示意与本地实测。
+第一次运行后，按[终端输出逐行解读](waymax-reading-first-output.md)查找字段，
+不用一开始就读懂所有测试名称和 JSON。
+每种文件的生成函数、来源和用途见[实验文件说明](waymax-files-explained.md)。
+新运行目录还会自动生成 `FILES.md`；旧档案保持原样，不回填修改。
+盘点之后的下一小步见[第一轮 expert 基线逐行讲解](waymax-first-baseline-walkthrough.md)，
+先认识轨迹和指标，不必立刻训练。
+
 ## 1. 学习地图
 
 ```text
-本地 TFRecord
-    -> 官方解析器 -> 两个 SimulatorState
-    -> 场景 0：expert -> 当前观测 / expert action -> 行为克隆训练
-    -> 场景 0：固定制动对照 -> 验证动作改变轨迹
-    -> 场景 1：独立评测 -> expert 与学习策略的轨迹/指标
-    -> checkpoint.npz -> 新 Python 进程 -> 相同预测/轨迹核对
+本地 TFRecord -> 按官方字段解析 -> 两份场景资料 SimulatorState
+    |
+    +-- 场景 0 -> expert 生成“当前观测 + 参考动作”
+    |                -> 行为克隆训练 -> 保存 checkpoint.npz
+    |
+    +-- 场景 0 -> expert / 固定动作分别运行 -> 检查动作是否改变轨迹
+    |
+    +-- 场景 1 -> expert / 学习策略分别运行 -> 比较轨迹和指标
+
+checkpoint.npz -> 新 Python 进程加载 -> 重跑场景 1 -> 核对预测/轨迹
 ```
+
+这些分支回答不同的问题，不是前一条轨迹继续开到下一条轨迹。
+训练与动作对照会从场景起点重新初始化；场景 1 是另一段记录。
+checkpoint 检查的是保存/恢复，不是驾驶策略质量。
 
 要区分三个概念：
 
@@ -34,7 +52,7 @@
 | 数据 | `../waymax/waymax/dataloader/testdata/tfrecord_with_routes` |
 | 规模 | 前 2 个不同 scenario ID，各最多 32 个对象 |
 | 时间 | 11 帧初始化历史，80 次 step，dt=0.1 秒 |
-| 划分 | 场景 0 训练，场景 1 评测；不是按同场景相邻帧假装独立数据 |
+| 划分 | 场景 0 训练，场景 1 开发/验证；不同记录，但已反复观察，不是盲测集 |
 | 模型 | 当前状态特征 → 32 单元 tanh 隐层 → 2 维 tanh 动作 |
 | 训练 | Optax Adam，300 次全批量更新，固定 seed=0 |
 
@@ -65,6 +83,7 @@ artifacts/waymax/learning-<UTC>-<随机后缀>/
 - `config.json`：本轮实际配置，不依赖以后可能变化的默认值。
 - `status.json`：阶段状态、耗时与父进程峰值 RSS。
 - `source/`、`code.json`：运行时脚本副本与哈希。
+- `FILES.md`、`file-guide.json`：根据本次目录生成的文件来源与用途导航。
 
 数据文件约 38 MiB，但只解析所选的两个记录，不遍历下载整个 Waymo 数据集。
 仓库测试数据不是自己的真实采集数据；如后续用于其它用途，应另行核对许可。

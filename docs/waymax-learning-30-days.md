@@ -4,7 +4,8 @@
 **2026-12-07** 结束；日期可整体顺延，不要求补跑“错过的天数”。
 每天建议 45–90 分钟，只推进已满足前置验证的内容。
 
-**这是后续学习安排，不是 30 天已经完成的记录。** 当前只完成了准备实验。
+**这是后续学习安排，不是 30 天已经完成的记录。** 工程准备已完成，
+Day 01 已开始学习但尚未验收；Day 02 只有备好的课单，尚未开始。
 日程与实际完成状态分开维护：
 
 - [每日进度与日志入口](learning/waymax-30-days/README.md)
@@ -12,6 +13,10 @@
 - [准备阶段实测](learning/waymax-30-days/preparation-20261107.md)
 - [已有操作手册](waymax-learning-lab.md)
 - [已有工程结果与负面结果](waymax-learning-results-20261107.md)
+- [先读：入门图解与中英文词表](waymax-concepts-illustrated.md)
+
+学习补记：Day 01 于 2026-11-07 提前开始概念讨论，尚未通过学习验收，
+具体记录在每日日志。下方建议日期保留，不改变实际完成状态。
 
 ## 1. 30 天后的目标
 
@@ -89,6 +94,10 @@ LAB_RUN=/home/my/workspace/autodrive/my-ad/artifacts/waymax/learning-某次实�
 | 05 | 2026-11-12 | 动力学与动作单位 | 读 `InvertibleBicycleModel`、expert 逆动力学和动作边界 | 动作字段、单位、边界表 | 区分加速度、转向曲率与方向盘角度；解释 expert 为什么使用下一帧日志 |
 | 06 | 2026-11-13 | 指标与有效性 | 读 `Lab.metrics` 调用与 `trajectory.csv`；独立核对一项均值 | 指标表、有效帧数与手算/标准库计算 | 区分米、帧比例、事故次数；不把 `null` 当 0 |
 | 07 | 2026-11-14 | 第一周复盘 | 重跑 baseline；用配置、ID、CSV、图片解释全过程 | `week-01.md` 和新 baseline RUN_DIR | P1/P2 均通过，两场景各 80 有效帧；不要求运行完整结果校验器 |
+
+Day 02 的只读操作步骤已备好：
+[解释器、安装登记与实际源码](learning/waymax-30-days/day-02.md)。
+不用重跑实验或新增结果目录，也不表示该学习日已经完成。
 
 **G1 周门槛**：能不看说明讲清“数据 → reset → action → step → metric”，
 并指出 expert 的答案来源。未满足就复习，不进入调参。

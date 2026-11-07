@@ -18,7 +18,7 @@ import traceback
 
 from lab_support import (
     CONFIG_PATH, REPO, git_snapshot, local_path, read_config,
-    require_cpu_environment, sha256, write_json,
+    require_cpu_environment, sha256, write_file_guide, write_json,
 )
 
 
@@ -138,6 +138,7 @@ def reload_evaluation(run, output):
         "scope": "Artifact reload reproducibility, not policy quality or safety",
     }
     write_json(output / "result.json", report)
+    write_file_guide(output, "reload", "PASS", include_manifest=False)
     print(f"P5 PASS: checkpoint reloaded in PID {os.getpid()}", flush=True)
     return report
 
@@ -307,6 +308,7 @@ def main():
         status["seconds"] = round(time.monotonic() - started, 3)
         status["peak_rss_mib"] = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 2)
         write_json(run / "status.json", status)
+        write_file_guide(run, args.stage, status["status"])
         write_json(run / "artifact-manifest.json", {
             "schema_version": 1,
             "files": {

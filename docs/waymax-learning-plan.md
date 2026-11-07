@@ -65,20 +65,20 @@ CPU 环境变量、线程数和进程 affinity 限制只作用于新进程。
 ## 执行日志
 
 1. P1 初次通过，产物：
-   `artifacts/waymax/learning-20261107T103618Z-k7gymij4/`。
+   `artifacts/waymax/_archive/learning-20261107T103618Z-k7gymij4/`。
    两个不同 scenario ID，fixture 40,073,764 bytes，JAX backend 为 CPU。
 2. P2 首次失败，产物：
-   `artifacts/waymax/learning-20261107T104337Z-0dl52ez7/`。
+   `artifacts/waymax/_archive/learning-20261107T104337Z-0dl52ez7/`。
    已安装 fork 调用 `jax.tree_map`，当前 JAX 0.11.2 已移除该别名。
    保留错误，不修改 fork 或升级环境；明确将本轮 `source_root` 改为
    `../waymax-my`，其源码已采用受支持的 `jax.tree.map`。
 3. P1/P2 复核通过，产物：
-   `artifacts/waymax/learning-20261107T104724Z-9blo18b0/`。
+   `artifacts/waymax/_archive/learning-20261107T104724Z-9blo18b0/`。
    两场景各 80 步、四项 SDC 指标各 80 有效帧；约 10.916 秒，
    峰值 RSS 888.12 MiB。两场景 expert 的平均日志位置差分别约
    0.01642 m / 0.01426 m；不作为独立驾驶策略的效果证明。
 4. 首次完整 P1-P5 通过，产物：
-   `artifacts/waymax/learning-20261107T105021Z-s0p4uex7/`。
+   `artifacts/waymax/_archive/learning-20261107T105021Z-s0p4uex7/`。
    33.248 秒，父进程峰值 RSS 911.73 MiB；loss 从 0.108001925 降至
    0.0000787876，checkpoint 约 17 KiB，新进程预测/轨迹差异均为 0。
    独立场景学习策略平均偏离约 15.75 m、越界帧比例 65%，故**仅工程通过，
@@ -87,7 +87,9 @@ CPU 环境变量、线程数和进程 affinity 限制只作用于新进程。
    `artifacts/waymax/learning-20261107T105737Z-_rn5s941/`。
    34.227 秒，父进程峰值 RSS 917.75 MiB，46 个留存文件校验 PASS。
    本轮与上轮 checkpoint 和五份轨迹 CSV 的 SHA256 完全相同；
-   对照记录为 `artifacts/waymax/repeatability-20261107.json`。
+   历史对照记录为 `artifacts/waymax/_archive/repeatability-20261107.json`；
+   按当前路径重算的记录为
+   `artifacts/waymax/_archive/repeatability-relocated-20261107.json`。
 6. `make test-waymax`：17 tests PASS；
    Waymax、既有学习手册、NAVSIM、Scenario 合约相关回归：29 tests PASS
    （包含上述 17 项，不重复计数）。
@@ -96,6 +98,11 @@ CPU 环境变量、线程数和进程 affinity 限制只作用于新进程。
 7. 单独执行 `make waymax-evaluate WAYMAX_RUN=<正式学习目录>` 再次通过，
    新进程 PID 2598395，80 步评测完成。产物为正式目录下
    `reload-20261107T110140532108Z/`，不覆盖原来的自动重载证据。
+8. 按学习者确认的方案整理：根目录保留三份主要结果，其余四个旧目录与历史
+   重复性报告移到 `_archive/`。未删除、未改写原始证据；
+   迁移 79 个文件和保留 87 个文件内容核对一致。
+   当前路径、历史日志定位及后续规则见
+   [结果保留与归档说明](waymax-artifact-retention.md)。
 
 ## 当前交付
 

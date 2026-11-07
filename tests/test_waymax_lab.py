@@ -128,6 +128,58 @@ class WaymaxLabTest(unittest.TestCase):
         for token in ("CUDA_VISIBLE_DEVICES=-1", "JAX_PLATFORMS=cpu", "taskset", "timeout"):
             self.assertIn(token, wrapper)
 
+    def test_inventory_file_guide_lists_only_current_stage_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            support.write_json(root / "environment.json", {"jax_backend": "cpu"})
+            original_hash = support.sha256(root / "environment.json")
+            support.write_file_guide(root, "inventory", "PASS")
+            guide = json.loads((root / "file-guide.json").read_text())
+            self.assertEqual("inventory", guide["stage"])
+            self.assertEqual({
+                "environment.json", "FILES.md", "file-guide.json", "artifact-manifest.json",
+            }, {record["name"] for record in guide["files"]})
+            self.assertNotIn("checkpoint.npz", {record["name"] for record in guide["files"]})
+            self.assertEqual(original_hash, support.sha256(root / "environment.json"))
+            self.assertIn("没有执行车辆推进、模型训练", (root / "FILES.md").read_text())
+
+    def test_baseline_file_guide_explains_csv_and_arrays_without_promoting_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            expert = root / "expert-0"
+            expert.mkdir()
+            (expert / "trajectory.csv").write_text("step,x_m,y_m\n1,1,2\n")
+            support.write_json(expert / "summary.json", {"steps": 1})
+            support.write_file_guide(root, "baseline", "PASS")
+            guide = json.loads((root / "file-guide.json").read_text())
+            csv_record = next(record for record in guide["files"]
+                              if record["name"] == "expert-0/trajectory.csv")
+            self.assertIn("Lab.rollout", csv_record["producer"])
+            self.assertIn("一行对应一步", csv_record["purpose"])
+            self.assertIn("没有训练小模型", (root / "FILES.md").read_text())
+            self.assertIn("不是训练好的模型", support.describe_artifact("expert-0/arrays.npz")[2])
+
+    def test_failed_run_guide_keeps_failure_and_explains_error_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "error.txt").write_text("example failure")
+            support.write_file_guide(root, "all", "FAIL")
+            guide = json.loads((root / "file-guide.json").read_text())
+            self.assertEqual("FAIL", guide["status"])
+            error_record = next(record for record in guide["files"] if record["name"] == "error.txt")
+            self.assertIn("错误回溯", error_record["purpose"])
+            self.assertIn("`FAIL`", (root / "FILES.md").read_text())
+
+    def test_reload_guide_does_not_claim_a_nonexistent_root_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            support.write_json(root / "result.json", {"status": "PASS"})
+            support.write_file_guide(root, "reload", "PASS", include_manifest=False)
+            guide = json.loads((root / "file-guide.json").read_text())
+            self.assertNotIn("artifact-manifest.json",
+                             {record["name"] for record in guide["files"]})
+            self.assertIn("不重新训练", (root / "FILES.md").read_text())
+
     def make_manifest(self, root):
         payload = root / "checkpoint.bin"
         payload.write_bytes(b"small-checkpoint")
