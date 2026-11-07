@@ -191,6 +191,15 @@ class PipelineSnapshotTest(unittest.TestCase):
         self.assertNotIn("gdb.execute(", capture)
         self.assertIn("graphics_calls_before", capture)
 
+    def test_compute_replay_worker_thread_is_explicit_and_bounded(self):
+        script = (SCRIPTS / "probe-vulkan-compute-replay.sh").read_text()
+        source = (SCRIPTS / "vulkan-compute-replay.c").read_text()
+        self.assertIn("CARLA_COMPUTE_DRIVER_THREAD_NAME", script)
+        self.assertIn("--driver-thread", script)
+        self.assertIn("pthread_setaffinity_np", source)
+        self.assertIn("pthread_attr_setstacksize", source)
+        self.assertIn("8 * 1024 * 1024", source)
+
     def test_invalid_bounds_do_not_launch(self):
         result = subprocess.run(["bash", str(SCRIPTS / "probe-ue-vulkan-pipeline.sh")],
                                 env={**os.environ, "CARLA_UE_PIPELINE_TIMEOUT": "invalid"},

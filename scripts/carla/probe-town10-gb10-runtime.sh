@@ -23,6 +23,7 @@ validation="${CARLA_RUNTIME_VULKAN_VALIDATION:-0}"
 validation_dir="${CARLA_VALIDATION_LAYER_DIR:-/opt/vulkan-validation-layer}"
 debug_utils="${CARLA_RUNTIME_VULKAN_DEBUG_UTILS:-0}"
 validation_stack_trace="${CARLA_RUNTIME_VULKAN_VALIDATION_STACK_TRACE:-}"
+loader_trace="${CARLA_RUNTIME_LOADER_TRACE:-0}"
 client_root="${CARLA_COOKED_CLIENT_ROOT:-/artifacts/carla/cooked-client-full/CarlaUnreal}"
 client_log="${CARLA_RUNTIME_CLIENT_LOG:-${client_root}/Saved/Logs/CarlaUnreal.log}"
 binary="${CARLA_RUNTIME_BINARY:-${client_root}/Binaries/LinuxArm64/CarlaUnreal}"
@@ -88,6 +89,9 @@ source "${script_dir}/arm64-renderer-scope.sh"
 }
 [[ "${debug_utils}" == 0 || "${debug_utils}" == 1 ]] || {
   echo "CARLA_RUNTIME_VULKAN_DEBUG_UTILS must be 0 or 1" >&2; exit 64;
+}
+[[ "${loader_trace}" == 0 || "${loader_trace}" == 1 ]] || {
+  echo "CARLA_RUNTIME_LOADER_TRACE must be 0 or 1" >&2; exit 64;
 }
 [[ -z "${validation_stack_trace}" || "${validation_stack_trace}" =~ ^[A-Za-z0-9-]{1,32}$ ]] || {
   echo "CARLA_RUNTIME_VULKAN_VALIDATION_STACK_TRACE must be empty or a short VUID substring" >&2; exit 64;
@@ -202,8 +206,15 @@ finish() {
       > "${run_dir}/cache-lifecycle-analysis.log" 2>&1 || lifecycle_code=$?
     printf '%s\n' "${lifecycle_code}" > "${run_dir}/cache-lifecycle-analysis-code.txt"
   fi
-  printf "# Town10 GB10 Runtime\n\n- Status: %s\n- Step: %s\n- Exit code: %s\n- Mode: %s\n- Render profile: %s\n- Server stop code: %s\n- Vulkan validation: %s\n- Vulkan debug utils: %s\n- Client abort: %s\n- Scope: staged native ARM64 CARLA on identified NVIDIA GB10, expected Town10 RPC world and requested endpoint gate\n- Excluded: graceful server shutdown, clean image, throughput, exhaustive visual correctness, ROS/Autoware integration\n" \
-    "${status}" "${step}" "${code}" "${mode}" "${render_profile}" "${server_code}" "${validation}" "${debug_utils}" "${client_abort}" > "${run_dir}/decision.md"
+  if [[ "${loader_trace}" == 1 ]]; then
+    local loader_code=0
+    python3 "${run_dir}/analyze_vulkan_loader_bindings.py" \
+      --run-dir "${run_dir}" --output "${run_dir}/loader-binding-analysis.json" \
+      > "${run_dir}/loader-binding-analysis.log" 2>&1 || loader_code=$?
+    printf '%s\n' "${loader_code}" > "${run_dir}/loader-binding-analysis-code.txt"
+  fi
+  printf "# Town10 GB10 Runtime\n\n- Status: %s\n- Step: %s\n- Exit code: %s\n- Mode: %s\n- Render profile: %s\n- Server stop code: %s\n- Vulkan validation: %s\n- Vulkan debug utils: %s\n- Loader trace: %s\n- Client abort: %s\n- Scope: staged native ARM64 CARLA on identified NVIDIA GB10, expected Town10 RPC world and requested endpoint gate\n- Excluded: graceful server shutdown, clean image, throughput, exhaustive visual correctness, ROS/Autoware integration\n" \
+    "${status}" "${step}" "${code}" "${mode}" "${render_profile}" "${server_code}" "${validation}" "${debug_utils}" "${loader_trace}" "${client_abort}" > "${run_dir}/decision.md"
   printf "%s town10-gb10-%s artifacts=%s step=%s exit=%s\n" "${status}" "${mode}" "${run_dir}" "${step}" "${code}"
   exit "${code}"
 }
@@ -281,12 +292,28 @@ python3 -c 'import carla,numpy; print(carla.__file__); print(numpy.__version__)'
 cp -a "${BASH_SOURCE[0]}" "${script_dir}/wait_carla_world.py" \
   "${script_dir}/check_carla_runtime.py" "${script_dir}/stage_report.py" \
   "${script_dir}/arm64-renderer-scope.sh" "${run_dir}/"
+if [[ "${loader_trace}" == 1 ]]; then
+  cp -a "${script_dir}/analyze_vulkan_loader_bindings.py" "${run_dir}/"
+  python3 - "${run_dir}/loader-trace-config.json" <<'PY'
+import json
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_text(json.dumps({
+    "LD_DEBUG": "bindings",
+    "output_prefix": "loader-bindings",
+    "scope": "server process group only; changes timing, not product configuration",
+}, indent=2, sort_keys=True) + "\n")
+PY
+fi
 if [[ "${cache_lifecycle}" == 1 ]]; then
   cp -a "${script_dir}/analyze_vulkan_cache_lifecycle.py" \
     "${script_dir}/analyze_vulkan_driver_entries.py" "${run_dir}/"
 fi
 sha256sum "${binary}" "${wheel}" "${provenance}" "${icd}" "${run_dir}"/*.py "${run_dir}"/*.sh \
   > "${run_dir}/inputs.sha256"
+if [[ "${loader_trace}" == 1 ]]; then
+  sha256sum "${run_dir}/loader-trace-config.json" >> "${run_dir}/inputs.sha256"
+fi
 mapfile -t renderer_flags < <(carla_renderer_systemsettings_flags)
 command=(
   timeout --signal=INT --kill-after=10 "$((startup_seconds + gate_seconds + 30))"
@@ -355,6 +382,10 @@ python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${command[@]}" > 
 step=startup
 (
   cd "${client_root}"
+  if [[ "${loader_trace}" == 1 ]]; then
+    export LD_DEBUG=bindings
+    export LD_DEBUG_OUTPUT="${run_dir}/loader-bindings"
+  fi
   exec "${command[@]}"
 ) > "${run_dir}/server.log" 2>&1 &
 server_pid=$!

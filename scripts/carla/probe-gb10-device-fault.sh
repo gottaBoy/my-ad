@@ -10,6 +10,8 @@ cache_lifecycle="${CARLA_GB10_FAULT_CACHE_LIFECYCLE:-0}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 debug="${CARLA_DEBUG_BINARY:-/workspace/carla/Unreal/CarlaUnreal/Binaries/LinuxArm64/CarlaUnreal.debug}"
 icd="${CARLA_GB10_ICD:-/etc/vulkan/icd.d/nvidia_icd.json}"
+binary_override="${CARLA_GB10_FAULT_BINARY:-}"
+expected_binary_sha_override="${CARLA_GB10_FAULT_EXPECTED_BINARY_SHA256:-}"
 
 [[ "${port}" =~ ^[1-9][0-9]*$ && "${port}" -ge 1024 && "${port}" -le 65532
    && "${seconds}" =~ ^[1-9][0-9]*$ && "${seconds}" -le 300 ]] || {
@@ -18,6 +20,18 @@ icd="${CARLA_GB10_ICD:-/etc/vulkan/icd.d/nvidia_icd.json}"
 [[ "${cache_lifecycle}" == 0 || "${cache_lifecycle}" == 1 ]] || {
   echo "CARLA_GB10_FAULT_CACHE_LIFECYCLE must be 0 or 1" >&2; exit 64;
 }
+if [[ -n "${binary_override}" ]]; then
+  [[ "${binary_override}" == /* && -f "${binary_override}" ]] || {
+    echo "CARLA_GB10_FAULT_BINARY must be an existing absolute path" >&2; exit 64;
+  }
+  [[ "${expected_binary_sha_override}" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "CARLA_GB10_FAULT_EXPECTED_BINARY_SHA256 is required with CARLA_GB10_FAULT_BINARY" >&2
+    exit 64
+  }
+elif [[ -n "${expected_binary_sha_override}" ]]; then
+  echo "CARLA_GB10_FAULT_EXPECTED_BINARY_SHA256 requires CARLA_GB10_FAULT_BINARY" >&2
+  exit 64
+fi
 [[ "${baseline}" == "${artifact_dir}"/town10-gb10-rpc-* && -d "${baseline}"
    && ! -L "${baseline}" && -f "${baseline}/server-command.json"
    && -f "${baseline}/decision.md" && -f "${debug}" && -f "${icd}"
@@ -56,6 +70,7 @@ cp -a "${script_dir}/dump-ue-vulkan-device-fault.gdb" \
 export CARLA_GDB_SCRIPTS="${run_dir}"
 export CARLA_UE_VULKAN_DEVICE_STATE="${run_dir}/device-create.json"
 export CARLA_GDB_CONTINUE_AFTER_DEVICE=1
+export CARLA_UE_VULKAN_FAULT_CONTEXT="${run_dir}/fault-thread-context.json"
 
 # Preserve the exact archived renderer/diagnostic options; only the owned
 # port and output directory change. The baseline binary must be the same file.
@@ -79,6 +94,9 @@ if (not isinstance(args, list) or len(args) < 8 or
     not any(x.startswith("-CarlaVulkanPipelineHistoryTarget=") for x in args)):
     raise SystemExit("baseline is not the expected mixed driver-entry capture")
 args = args[4:]
+binary_override = os.environ.get("CARLA_GB10_FAULT_BINARY", "")
+if binary_override:
+    args[0] = binary_override
 ports = [i for i, value in enumerate(args) if re.fullmatch(r"-carla-rpc-port=[0-9]+", value)]
 if len(ports) != 1:
     raise SystemExit("baseline port is not unique")
@@ -97,7 +115,11 @@ PY
 mapfile -d '' -t client_args < "${run_dir}/launch-args.nul"
 binary="${client_args[0]}"
 [[ -x "${binary}" ]] || { echo "Baseline binary is not executable" >&2; exit 2; }
-expected_sha="$(awk -v path="${binary}" '$2 == path {print $1}' "${baseline}/inputs.sha256")"
+if [[ -n "${binary_override}" ]]; then
+  expected_sha="${expected_binary_sha_override}"
+else
+  expected_sha="$(awk -v path="${binary}" '$2 == path {print $1}' "${baseline}/inputs.sha256")"
+fi
 [[ "${expected_sha}" =~ ^[0-9a-f]{64}$ && "$(sha256sum "${binary}" | awk '{print $1}')" == "${expected_sha}" ]] || {
   echo "Baseline binary changed after evidence capture" >&2; exit 2;
 }

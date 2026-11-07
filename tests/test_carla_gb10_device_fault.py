@@ -31,6 +31,9 @@ class Gb10DeviceFaultTest(unittest.TestCase):
         capture = (SCRIPT.parent / "gdb_vulkan_device_capture.py").read_text()
         self.assertIn("gdb_vulkan_device_capture.start()", gdb)
         self.assertIn("CARLA_GDB_CONTINUE_AFTER_DEVICE", capture)
+        self.assertIn("Cpus_allowed_list", capture)
+        self.assertIn("tpidr_el0", capture)
+        self.assertIn("fault-thread-context.json", capture)
         self.assertNotIn("gdb_vulkan_pipeline_capture", gdb)
         self.assertIn("--signal=INT", script)
         self.assertIn('args[2].startswith("--kill-after=")', script)
@@ -40,9 +43,28 @@ class Gb10DeviceFaultTest(unittest.TestCase):
         self.assertIn("libnvidia-glvkspirv", script)
         self.assertIn('grep -Fq', script)
         self.assertIn('"-CarlaVulkanCacheLifecycle"', script)
+        self.assertIn("CARLA_GB10_FAULT_BINARY", script)
+        self.assertIn("CARLA_GB10_FAULT_EXPECTED_BINARY_SHA256", script)
+        self.assertIn("binary_override", script)
         self.assertIn('status=CAPTURED_FAULT', script)
         self.assertNotIn("|| true", script)
         self.assertNotIn("status=PASS", script)
+
+    def test_binary_override_requires_explicit_sha(self):
+        result = subprocess.run(
+            ["bash", str(SCRIPT)],
+            env={**os.environ, "CARLA_GB10_FAULT_BINARY": "/tmp/not-present"},
+            capture_output=True, text=True,
+        )
+        self.assertEqual(64, result.returncode, result.stderr)
+
+    def test_make_target_requires_explicit_inputs(self):
+        result = subprocess.run(
+            ["make", "carla-gb10-device-fault"],
+            cwd=ROOT, capture_output=True, text=True,
+        )
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("GB10_FAULT_BASELINE is required", result.stderr + result.stdout)
 
 
 if __name__ == "__main__":

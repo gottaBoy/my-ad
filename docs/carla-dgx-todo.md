@@ -1,10 +1,44 @@
 # CARLA / DGX GB10 修复清单
 
-更新：2026-09-28（本地）。最终目标为原生 GB10 上 Town10 世界就绪、同步仿真、
+更新：2026-10-07（本地）。最终目标为原生 GB10 上 Town10 世界就绪、同步仿真、
 RGB/LiDAR 有效数据、持续稳定运行及可复现部署。当前未达到产品验收。
 
 **需要人做决定的三件事汇总在 `docs/carla-handoff.md`**（厂商包发送、引擎提案落点、fork 改动
 固化方式）；本文件是未完成项与逐项证据的唯一清单。
+
+## 10 月 7 日恢复进展
+
+**已恢复排查。** 本轮完成真实 GB10 故障捕获、UE 任务上下文采集和可复用 Make 入口；
+主阻塞仍未修复，停服提案仍未应用。
+
+- 主阻塞：完整 UE 进程在 GB10 / 580.173.02 的 Vulkan pipeline 创建过程中于 NVIDIA
+  编译器内崩溃；位置已知，充分根因及最小修复未知，产品验收未通过。
+- 新证据：`artifacts/carla/gb10-device-fault-20261007T133547Z-fXVgwX/` 的 fault
+  thread 为 `Backgro-rker #2`，CPU 2、allowed CPU `0-19`、约 8 MiB stack；
+  `FTaskTagScope` 为 `ERenderingThread | EParallelThread`，active low-level task
+  为 `GraphTask`。这把上下文采集从普通 pthread 对照推进到了真实 UE task context。
+- 负向证据不能写成完全排除：cache/allocator/对象存活/loader binding 与独立 worker
+  对照尚未覆盖全部组合、时序及内存状态。`UE::Tasks::Private::CurrentTask` 在优化构建中
+  为 optimized out，`tpidr_el0=null` 表示未读到 TLS 寄存器，不是 TLS 已验证为空。
+- 停服静态析构顺序缺陷独立存在：根因确认，guard 提案未应用、未验证修复效果，
+  需维护者明确落点；它不解决启动期编译器崩溃。
+- 驱动不可更换；仍可调查，但不能保证应用侧可修。独立 replay PASS 不证明应用侧不可修。
+- 最近完整本地回归：840 tests / 56 skipped / 0 failures；仅说明本地回归状态，
+  不等于 GB10 产品验收。本轮不重跑完整回归。
+
+接下来按顺序推进，只有取得验收证据才勾选：
+
+- [x] 采集真实 UE 任务标签和 active low-level task；重复 fault 均落在
+  `ERenderingThread | EParallelThread`，最终任务名为 `GraphTask`。
+- [x] 把任务上下文与故障 driver-entry 关联：未返回 compute 与 GDB fault stop
+  同为 LWP 116、`ERenderingThread | EParallelThread`、`GraphTask`；证据见 audit 9.99。
+- [ ] 采集调用前有界内存/对象状态并做单变量对照，继续最小化故障前 Vulkan 调用序列；
+  不继续堆积无判别力的日志。
+- [ ] 单变量因果对照，实施并验证最小修复；驱动缺陷无应用侧绕法时需厂商支持或验收路线决策。
+- [ ] Town10 世界就绪 → 同步 tick → RGB/LiDAR 数据与对齐 → 长时间稳定性逐级通过。
+- [ ] 单独决定停服提案落点，应用后验证正常退出及 GB10 停服记录。
+
+详细证据边界见 `docs/carla-dgx-audit.md` 9.99；本节优先于下方历史进度中的过强排除表述。
 
 ## 现在就可用的（已完成，可直接使用）
 
@@ -22,18 +56,47 @@ RGB/LiDAR 有效数据、持续稳定运行及可复现部署。当前未达到�
 | GB10 厂商证据包（39 运行 + 封面）与**数字自校验** | `artifacts/gb10-driver-report/20261003T052318Z/` + `tests/test_carla_gb10_bundle.py` | 封面每个数字从 `report.json` 反推比对 |
 | 决策队列一页 | `docs/carla-handoff.md` | 引用的 `artifacts/` 路径有测试保证存在 |
 
-回归：`make test-local` → **826 tests / 0 failures / 56 skipped**。
+回归：`make test-local` → **840 tests / 0 failures / 56 skipped**。
+
+## 10 月 5 日更新
+
+- GPU 当前已可达：宿主 `nvidia-smi` 与诊断容器 `vulkaninfo` 均识别 GB10 /
+  580.173.02。当前正式 stage 与 fork 构建 binary 的 SHA256 均为 `a53f37d7…`，
+  两个 fork 工作树仍干净，停服补丁提案仍未应用。
+- 基线 `town10-gb10-rpc-20261005T143823Z-BBzto1` 重新触发
+  `shader-compiler-sigsegv / stop 139`；不是 `vkCreateDevice` 被拒。
+- 新增默认关闭的 `RUNTIME_LOADER_TRACE=1`，只对 server process group
+  记录 `LD_DEBUG=bindings`；最后的跟踪运行
+  `town10-gb10-rpc-20261005T151630Z-cArNz3` 也在同一编译器位置崩溃。
+  851 条已解析 binding 中，驱动到 `CarlaUnreal` 只观察到标准 I/O
+  `stdin/stdout/stderr`（ELF 有对应 COPY relocation），没有观察到 C++/LLVM、
+  内存或线程函数被 UE 接管。不是完整的符号污染排除或产品 PASS。
+- 独立同输入 compute replay 在今天的 GB10 上再次 PASS：
+  `vulkan-compute-recheck-20261005T1517Z-84VLLa/result.json`，约 0.011 秒，
+  device snapshot SHA `b7191688…`、656-byte shader、21098-byte cache 与旧归档哈希相符。
+- [x] 采集真实故障线程的 stack/TLS 与调用前执行环境，并做独立 worker replay：
+  fault thread 出现过 Foreground/Background worker，允许 CPU `0-19`，保存 PC/SP、
+  processor、stack mapping、上下文切换计数；同一输入在 `ForeReplay` worker（CPU 0、
+ 8 MiB stack）中 PASS。worker 类别/CPU/栈大小不是充分触发条件。
+- [x] 采集 UE 任务标签和 active low-level task：GDB fault context schema 2，
+  `ERenderingThread | EParallelThread` + `GraphTask`；不再重复简单 worker 线程参数实验。
+- [ ] 下一项：采集调用前内存状态，并把任务上下文与故障 driver-entry 做单变量对照；
+  不再重复已完成的 cache/allocator/设备配置实验。
+  bindless 在当前设备配置下不启用，不应为了“补覆盖”强行改变产品策略。
+
+这修正了下面的历史挂起判断：GPU 可达并且可以继续应用侧诊断；
+独立输入 PASS **不证明**应用层不存在可验证修复。根因及 GB10 产品门禁仍未通过。
 
 ## 做不了、已挂起的（阻塞原因 + 谁能解开）
 
 | 挂起的事 | 为什么现在做不了 | 谁能解开 |
 | --- | --- | --- |
-| 清单第 2/3/5/6/8 项（GB10 世界、RGB/LiDAR、长跑） | 故障在 NVIDIA 的 SPIR-V 编译器里，且**我们的输入单独能过**（独立 GB10 进程 0.016 s）⇒ 不是我们能在应用层绕开的 | 厂商回复，或重定验收范围 |
-| 把上下文依赖变成**确定性复现**（唯一能让厂商可行动的形态） | 需要 GPU 时间做实验 | 你/组织批 GPU 时间 |
-| 停服采集接 GB10 profile、`Shutdown:` 字段接 GB10 记录 | 代码可写，但**跑不了**（要 GPU 才产生新证据） | GPU 可达 |
-| 第 3 项下一步：串行化扩展到 `vkCreateShaderModule`/layout/descriptor/cache 入口 | 同上，需 GPU 才有证据；且 39 运行已否掉「验证层」这条 | GPU 可达 |
+| 清单第 2/3/5/6/8 项（GB10 世界、RGB/LiDAR、长跑） | 编译器崩溃仍可复现；独立 replay PASS 说明缺少进程上下文，不证明应用侧不可修 | 继续 GPU 上下文差分；厂商输入约束/绕法反馈 |
+| 把上下文依赖变成确定性复现 | 10 月 5 日 GPU 可达；仍需找到充分触发条件 | 可继续实验，不再以缺 GPU 挂起 |
+| 停服采集接 GB10 profile、`Shutdown:` 字段接 GB10 记录 | 独立停服缺陷未修；GB10 启动本身仍受编译器崩溃阻塞 | 可继续接线/实测，不自动应用引擎提案 |
+| 第 3 项：串行化覆盖 shader/layout/descriptor/cache 入口 | 9.75 已实测同一把锁仍崩溃，不再重复这一负向实验 | 改查调用线程环境与未复现的驱动上下文 |
 | 应用引擎修复提案 | 属上游生命周期契约，影响所有 GPU message 使用者 | 上游/维护者定落点 |
-| 第 9 项：fork 改动固化方式 | **已定并已完成（2026-10-03）** | 两 fork 已提交并推送（carla `f6cbc59b`、ue `5502950e`），provenance 与 manifest 均为 `tracked_dirty=0`/`untracked=0`，冻结 delta 为空——见 `docs/carla-handoff.md` 与 audit 9.93 |
+| 第 9 项：fork 改动固化方式 | **正式产物已完成；实验诊断暂未固化** | 正式 stage 仍描述两棵干净 fork；本轮为采集 driver-entry task context 临时修改 UE `VulkanPipeline.cpp` 1 个文件，未进入正式验收 binary，见 audit 9.99 |
 | 发送 GB10 厂商包 | **已从"建议"降级为"备选"**：证据核心只有 2 条符号栈 + 1 条判别实验，故障非确定性 ⇒ 对方大概率回「请给可复现样本」 | 你的渠道；若无渠道则此路作废 |
 | 重定 GB10 验收范围 | 产品决策 | 你/组织 |
 

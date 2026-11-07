@@ -294,7 +294,7 @@ class Gb10RuntimeTest(unittest.TestCase):
         self.assertIn('client_abort=nvidia-driver-sigsegv', script)
         self.assertIn("Cannot create a Vulkan device", script)
         self.assertIn("- Client abort: %s", script)
-        self.assertIn('"${validation}" "${debug_utils}" "${client_abort}"', script)
+        self.assertIn('"${validation}" "${debug_utils}" "${loader_trace}" "${client_abort}"', script)
 
     def test_driver_call_serialization_covers_non_pipeline_entry_points(self):
         script = (SCRIPTS / "probe-town10-gb10-runtime.sh").read_text()
@@ -334,6 +334,10 @@ class Gb10RuntimeTest(unittest.TestCase):
                             body.index(call))
         self.assertIn("VulkanRHI::vkMergePipelineCaches(", pipeline)
         self.assertIn("VulkanRHI::vkGetPipelineCacheData(", pipeline)
+        self.assertIn("FTaskTagScope::GetCurrentTag()", pipeline)
+        self.assertIn("LowLevelTasks::FTask::GetActiveTask()", pipeline)
+        self.assertIn("task_tag=0x%08x", pipeline)
+        self.assertIn("low_level_task_name=%s", pipeline)
         # Descriptor allocation and update are covered too.
         self.assertIn("VulkanRHI::vkAllocateDescriptorSets(", pending)
         self.assertIn("VulkanRHI::vkUpdateDescriptorSets(", pending)

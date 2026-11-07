@@ -36,7 +36,9 @@ class DriverEntryTest(unittest.TestCase):
             "replay_ready=0\ncache_data=null\ncache_bytes=0\nend=1\n"
         )
         (self.run_dir / "driver-compute-2-43-main_compute.enter.txt").write_text(
-            "schema=1\nphase=enter\nentry=main_compute\nend=1\n"
+            "schema=1\nphase=enter\nentry=main_compute\nthread=43\n"
+            "task_tag=0x40000010\nlow_level_task=0x1234\n"
+            "low_level_task_name=GraphTask\nend=1\n"
         )
         self.compute_result = self.run_dir / "driver-compute-2-43-main_compute.result.txt"
         self.compute_result.write_text("schema=1\nphase=return\nresult=0\nend=1\n")
@@ -50,6 +52,22 @@ class DriverEntryTest(unittest.TestCase):
             report["compute_enters"], report["compute_returns"]))
         self.assertEqual("main_vertex", report["unreturned"][0]["stages"][0]["entry"])
         self.assertFalse(report["replay_ready"])
+
+    def test_preserves_task_context_for_unreturned_compute(self):
+        self.compute_result.unlink()
+        (self.run_dir / "driver-graphics-1-42.result.txt").write_text(
+            "schema=1\nphase=return\nresult=0\nend=1\n"
+        )
+        report = entries.analyze(self.run_dir)
+        self.assertEqual(43, report["unreturned"][0]["thread"])
+        self.assertEqual(
+            {
+                "task_tag": "0x40000010",
+                "low_level_task": "0x1234",
+                "low_level_task_name": "GraphTask",
+            },
+            report["unreturned"][0]["task_context"],
+        )
 
     def test_rejects_missing_or_mismatched_spirv(self):
         module_path = self.run_dir / "graphics-shaders/module-123.spv"

@@ -16,6 +16,8 @@ STAGE = re.compile(
 SHADER_PATH = re.compile(r"graphics-shaders/module-[0-9]+\.spv")
 RENDER_PASS_PATH = re.compile(r"renderpasses/renderpass-[0-9]+-0x[0-9a-fA-F]+\.txt")
 EXECUTION_MODEL = {1: 0, 2: 1, 4: 2, 8: 3, 16: 4}
+TASK_TAG = re.compile(r"0x[0-9a-fA-F]{1,8}")
+TASK_POINTER = re.compile(r"0x[0-9a-fA-F]+")
 
 
 def fields(path):
@@ -116,6 +118,27 @@ def render_pass_snapshot(run_dir, path_name, handle):
             "dependencies": dependencies, "sha256": hashlib.sha256(data).hexdigest()}
 
 
+def task_context(details, path):
+    names = ("task_tag", "low_level_task", "low_level_task_name")
+    present = [name in details for name in names]
+    if not any(present):
+        return None
+    if not all(present):
+        raise ValueError(f"partial task context: {path.name}")
+    if not TASK_TAG.fullmatch(details["task_tag"]):
+        raise ValueError(f"invalid task tag: {path.name}")
+    if not TASK_POINTER.fullmatch(details["low_level_task"]):
+        raise ValueError(f"invalid low-level task pointer: {path.name}")
+    name = details["low_level_task_name"]
+    if not name or len(name) > 128 or "\n" in name or "\r" in name:
+        raise ValueError(f"invalid low-level task name: {path.name}")
+    return {
+        "task_tag": details["task_tag"],
+        "low_level_task": details["low_level_task"],
+        "low_level_task_name": name,
+    }
+
+
 def analyze(run_dir):
     markers = sorted(run_dir.glob("driver-graphics-*.enter.txt"))
     compute = sorted(run_dir.glob("driver-compute-*.enter.txt"))
@@ -129,6 +152,7 @@ def analyze(run_dir):
     for kind, paths in (("graphics", markers), ("compute", compute)):
         for path in paths:
             details = fields(path)
+            context = task_context(details, path)
             original_cache = details.get("cache")
             submitted_cache = details.get("submitted_cache", original_cache)
             if (original_cache is not None and
@@ -150,6 +174,13 @@ def analyze(run_dir):
                 if not result_path.exists():
                     item = {"kind": kind, "marker": path.name,
                             "entry": details.get("entry")}
+                    if "thread" in details:
+                        try:
+                            item["thread"] = int(details["thread"])
+                        except ValueError as error:
+                            raise ValueError(f"invalid driver thread: {path.name}") from error
+                    if context is not None:
+                        item["task_context"] = context
                     if original_cache is not None:
                         item.update(cache=original_cache, submitted_cache=submitted_cache)
                     unreturned.append(item)

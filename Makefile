@@ -14,7 +14,7 @@ CARLA_TOOLCHAIN_IMAGE ?= my-ad/carla-toolchain:arm64
 .PHONY: init preflight config build-tools build-tools-sim build-navsim up-dgx up-sim collect-sim down-dgx down-sim \
 	record record-sim replay viz scenario scenario-up scenario-prepare isaac navsim navsim-cache data deploy test-compose test-local \
 	harness-host harness-gpu harness-network harness-clock harness-runtime harness-ros harness-ros-scenario harness-navsim inspect-modules learn-module collect-env \
-carla-config carla-g0 carla-shell carla-build-shell carla-ue-check carla-ue-setup carla-shader-deps carla-scw carla-ispc carla-ue-build carla-startup-probe carla-editor-check carla-editor-deps carla-editor-build carla-editor-startup carla-editor-cook carla-full-cook carla-stage-cooked-server carla-cooked-server carla-lavapipe-sensors carla-town10-nullrhi-rpc carla-ue-shutdown-crash carla-vulkan-compute carla-vulkan-compute-gpu carla-ue-vulkan-device-state carla-ue-vulkan-device-state-gpu carla-audio-deps carla-assimp carla-ue-meshbridge carla-vulkan carla-ufbx carla-ue-ufbxbridge carla-runtime-check carla-interchange carla-manifest carla-manifest-verify carla-usd-inventory carla-vulkan-validation-layer carla-gb10-vulkan-comparison carla-symbolize-client-crash carla-gb10-driver-report
+carla-config carla-g0 carla-shell carla-build-shell carla-ue-check carla-ue-setup carla-shader-deps carla-scw carla-ispc carla-ue-build carla-startup-probe carla-editor-check carla-editor-deps carla-editor-build carla-editor-startup carla-editor-cook carla-full-cook carla-stage-cooked-server carla-cooked-server carla-lavapipe-sensors carla-town10-nullrhi-rpc carla-ue-shutdown-crash carla-vulkan-compute carla-vulkan-compute-gpu carla-ue-vulkan-device-state carla-ue-vulkan-device-state-gpu carla-audio-deps carla-assimp carla-ue-meshbridge carla-vulkan carla-ufbx carla-ue-ufbxbridge carla-runtime-check carla-interchange carla-manifest carla-manifest-verify carla-usd-inventory carla-vulkan-validation-layer carla-gb10-vulkan-comparison carla-gb10-device-fault carla-symbolize-client-crash carla-gb10-driver-report
 
 init:
 	mkdir -p data/maps/sample-map-planning data/bags data/ground_truth data/datasets data/models data/engines data/logs data/reports data/cache \
@@ -326,6 +326,7 @@ carla-town10-gb10-runtime:
 		-e CARLA_RUNTIME_NULL_PIPELINE_CACHE=$(or $(RUNTIME_NULL_PIPELINE_CACHE),0) \
 		-e CARLA_RUNTIME_VULKAN_VALIDATION=$(or $(RUNTIME_VULKAN_VALIDATION),0) \
 		-e CARLA_RUNTIME_VULKAN_DEBUG_UTILS=$(or $(RUNTIME_VULKAN_DEBUG_UTILS),0) \
+		-e CARLA_RUNTIME_LOADER_TRACE=$(or $(RUNTIME_LOADER_TRACE),0) \
 		-e CARLA_RUNTIME_VULKAN_VALIDATION_STACK_TRACE="$(or $(RUNTIME_VULKAN_VALIDATION_STACK_TRACE),)" \
 		-e CARLA_GB10_SERIALIZE_DRIVER_CALLS=$(or $(GB10_SERIALIZE_DRIVER_CALLS),0) \
 		-e CARLA_GB10_SERIALIZE_MIXED_PIPELINES=$(or $(GB10_SERIALIZE_MIXED_PIPELINES),0) carla-vulkan \
@@ -341,6 +342,22 @@ carla-vulkan-validation-layer:
 .PHONY: carla-gb10-vulkan-comparison
 carla-gb10-vulkan-comparison:
 	python3 scripts/carla/compare_gb10_vulkan_diagnostics.py $(if $(CONFIGS),--configs $(CONFIGS),) $(if $(RUN_ALL),--run-all,)
+
+# Replays a known mixed-pipeline GB10 diagnostic command with an explicitly
+# hashed binary. Paths are container paths because the target runs in carla-vulkan.
+.PHONY: carla-gb10-device-fault
+carla-gb10-device-fault:
+	@test -n "$(GB10_FAULT_BASELINE)" || { echo "GB10_FAULT_BASELINE is required"; exit 64; }
+	@test -n "$(GB10_FAULT_BINARY)" || { echo "GB10_FAULT_BINARY is required"; exit 64; }
+	@test -n "$(GB10_FAULT_BINARY_SHA256)" || { echo "GB10_FAULT_BINARY_SHA256 is required"; exit 64; }
+	$(CARLA_COMPOSE) --profile gpu run --rm -T \
+		--cap-add SYS_PTRACE \
+		-e CARLA_GB10_FAULT_BASELINE="$(GB10_FAULT_BASELINE)" \
+		-e CARLA_GB10_FAULT_BINARY="$(GB10_FAULT_BINARY)" \
+		-e CARLA_GB10_FAULT_EXPECTED_BINARY_SHA256="$(GB10_FAULT_BINARY_SHA256)" \
+		-e CARLA_GB10_FAULT_SECONDS=$(or $(GB10_FAULT_SECONDS),90) \
+		-e CARLA_GB10_FAULT_PORT=$(or $(GB10_FAULT_PORT),20260) \
+		carla-vulkan bash /opt/my-ad/scripts/carla/probe-gb10-device-fault.sh
 
 # Symbolizes a crashed GB10 run with the ARM64 Development debug binary; the
 # staged client is built with -NoDumpSyms so UE prints UnknownFunction there.

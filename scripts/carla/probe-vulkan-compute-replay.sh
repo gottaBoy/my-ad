@@ -11,6 +11,8 @@ device_state="${CARLA_COMPUTE_DEVICE_STATE:-}"
 cache_file="${CARLA_COMPUTE_CACHE_FILE:-}"
 cache_flags="${CARLA_COMPUTE_CACHE_FLAGS:-0}"
 history_file="${CARLA_COMPUTE_HISTORY_FILE:-}"
+driver_thread_name="${CARLA_COMPUTE_DRIVER_THREAD_NAME:-}"
+driver_thread_cpu="${CARLA_COMPUTE_DRIVER_THREAD_CPU:-}"
 timeout_seconds="${CARLA_COMPUTE_TIMEOUT:-30}"
 artifact_dir="${CARLA_ARTIFACT_DIR:-/artifacts/carla}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -41,6 +43,15 @@ fixture="${script_dir}/vulkan-compute-smoke.comp"
 [[ -z "${history_file}" || -f "${history_file}" ]] || {
   echo "CARLA_COMPUTE_HISTORY_FILE is missing: ${history_file}" >&2; exit 2;
 }
+[[ -z "${driver_thread_name}" || "${driver_thread_name}" =~ ^[A-Za-z0-9_.-]{1,15}$ ]] || {
+  echo "CARLA_COMPUTE_DRIVER_THREAD_NAME must be 1..15 safe characters" >&2; exit 64;
+}
+if [[ -n "${driver_thread_name}" ]]; then
+  [[ "${driver_thread_cpu}" =~ ^[0-9]+$ && "${driver_thread_cpu}" -le 255 ]] || {
+    echo "CARLA_COMPUTE_DRIVER_THREAD_CPU must be 0..255 with a driver thread name" >&2
+    exit 64
+  }
+fi
 [[ "${timeout_seconds}" =~ ^[1-9][0-9]*$ && "${timeout_seconds}" -le 300 ]] || {
   echo "CARLA_COMPUTE_TIMEOUT must be a positive integer <= 300" >&2
   exit 64
@@ -130,6 +141,7 @@ if [[ -n "${history_file}" ]]; then
 fi
 command=(
   cc -std=c11 -O2 -Wall -Wextra -Werror -Wno-unused-parameter
+  -pthread
   "${build_options[@]}"
   -I/usr/include/vulkan
   -I"${run_dir}"
@@ -203,6 +215,9 @@ fi
 if [[ -n "${history_file}" ]]; then
   command+=(--history "${history_file}")
   sha256sum "${history_file}" >> "${run_dir}/inputs.sha256"
+fi
+if [[ -n "${driver_thread_name}" ]]; then
+  command+=(--driver-thread "${driver_thread_name}" "${driver_thread_cpu}")
 fi
 python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${command[@]}" \
   > "${run_dir}/command.json"

@@ -4714,3 +4714,243 @@ SHA256 为 `…bbf1bb3e1d67399a3`，磁盘实测为 `…bbf1bb3a1d67399a3`——
 之外还有别的门（缺图等）在拦。运行期 NVIDIA 路径的 PSO 创建崩溃仍在，客户端只能走
 Lavapipe；长时稳定性（9.37）仍未达标。**因此：构建期「卡在 Vulkan」= 已解决；
 GB10 GPU 上的运行期与长时验收 = 仍未解决。**
+
+### 9.95 2026-10-05（本地）GPU 可达与进程符号解析负向对照
+
+本轮重新读取了 9.74–9.94 的后续记录，没有继续沿用 9 月 29 日的
+旧工作树状态。两 fork 工作树均干净；正式 `cooked-client-full` binary
+与当前构建产物同为
+`a53f37d73cf97c87c70e020b4e4327eed4e1d2b8ea333a3e31cb694ac32bf64e`。
+宿主 `nvidia-smi` 与容器 `vulkaninfo` 再次识别 NVIDIA GB10 /
+580.173.02；因此「缺 GPU、不能继续实验」不是当前事实。驱动未更换，
+停服 guard 提案未应用，本轮没有修改或重编 fork 源码。
+
+当天实测：
+
+| 证据目录（`artifacts/carla/`） | 结果 |
+| --- | --- |
+| `town10-gb10-rpc-20261005T143823Z-BBzto1` | 当前正式 stage 的无诊断基线；startup FAIL、stop 139、`Client abort: shader-compiler-sigsegv`，不是设备创建被拒 |
+| `town10-gb10-rpc-20261005T145744Z-GCt2gl` | `LD_DEBUG=bindings` 跟踪；startup 同类 SIGSEGV，原始日志保留；初版 parser 对拼接行计数不准，以下结论使用最终 parser 的再次运行 |
+| `town10-gb10-rpc-20261005T151630Z-cArNz3` | 最终 parser 随运行归档，分析退出 0；851 条 NVIDIA binding；仍在 `libnvidia-glvkspirv.so.580.173.02` 的 `0x34d610` 处访问地址 `0x8` 崩溃 |
+| `vulkan-compute-recheck-20261005T1517Z-84VLLa` | 复用同轮故障输入的归档 replay，原始输入哈希全部复核；656-byte shader、21098-byte cache、device SHA `b7191688…`，独立 GB10 创建再次 PASS（约 0.011 秒），`ue_exact_replay=false` |
+
+新诊断开关 `CARLA_RUNTIME_LOADER_TRACE=1` / make
+`RUNTIME_LOADER_TRACE=1` 默认关闭。只在 server 子进程组内设置
+`LD_DEBUG=bindings` 与独立的 `LD_DEBUG_OUTPUT`，不污染 RPC 客户端
+或 `vulkaninfo`；记录会改变调度，不作为产品配置。
+`analyze_vulkan_loader_bindings.py` 有文件数/字节/行长限制，校验 PID、
+完整行、文件类型、实际 server executable，并为原始文件记录 SHA256。
+glibc 多线程拼接输出按独立 PID/binding 前缀逐条解析；截断或未知 driver
+格式报错，不把“读不到”写成“没有符号冲突”。
+
+静态 ELF 检查：UE 导出的动态符号与 `glvkspirv`/`eglcore` 的
+undefined 符号交集只有 `stdin/stdout/stderr`，三者均有
+`R_AARCH64_COPY` relocation。运行时跟踪也只观察到这三个标准 I/O
+对象从 `CarlaUnreal` 解析；驱动使用的已观察内存、线程函数解析到 libc，
+没有观察到 C++/LLVM 编译或内存分配函数被 UE 接管。
+**这仅降低了该符号冲突假设的优先级**，不代表排除了 dlsym 手工解析、
+所有其它库、完整 driver 内部状态或所有进程内存问题。
+
+判别结果仍是「完整 UE 崩、独立同输入创建过」。旧交接页把这解释为
+「应用层不可能绕、只能等厂商」过强，已修正：独立 PASS 说明缺进程
+上下文，不能证明应用侧不存在修复；厂商反馈与本地差分可并行。
+下一项优先采集 UE 任务标签/调用前内存状态，再做独立 worker replay
+的单变量对照；10 月 6 日已完成 stack/TLS、CPU affinity、stack size
+的负向对照，不再重复 cache/allocator/设备配置和简单 worker 参数实验。
+Town10 世界就绪、RGB/LiDAR、长时 GB10 验收继续 **BLOCKED**。
+本地回归 837 tests、56 skipped、0 failures，shell/JSON/diff 检查通过。
+
+### 9.96 2026-10-06（本地）fault worker 执行环境与独立 worker replay
+
+低干扰 GDB fault capture 现在在信号停点保存只读
+`fault-thread-context.json`：fault thread number/name/ptid、PC/SP、
+可读 TLS 寄存器（不可读则显式为 null）、`/proc/<pid>/task/<tid>/status`
+中的 CPU allowed list 与上下文切换计数、`/proc/.../stat` 的实际
+processor，以及 SP 所在 stack mapping。不会调用 inferior 函数或切换
+线程状态。
+
+10 月 6 日同一 fault-context 证据：
+`artifacts/carla/gb10-device-fault-20261006T030625Z-CmYWX4/`。
+fault thread 为 `Foregro-rker #1`、LWP 100、processor 0、allowed CPU
+`0-19`、约 8 MiB stack mapping，PC 落在
+`libnvidia-glvkspirv.so.580.173.02`。此前另一轮出现
+`Backgro-rker #4`，故障不绑定单一 UE worker 类别。
+
+新增独立 compute replay 选项 `--driver-thread NAME CPU`，创建命名
+pthread、设置 affinity 和 8 MiB stack 后调用同一个
+`vkCreateComputePipelines`。对同一 656-byte shader、21098-byte
+cache、同一 device snapshot SHA `b7191688…` 和同一 layout：
+
+| 模式 | 结果 |
+| --- | --- |
+| 主线程 | `VK_SUCCESS`，约 0.011 s |
+| `ForeReplay` worker / CPU 0 / 8 MiB stack | `VK_SUCCESS`，约 0.015 s |
+
+证据：`artifacts/carla/vulkan-compute-worker-replay-20261006T0315/`。
+报告明确 `ue_exact_replay=false`。因此 worker 类别、CPU 0、允许 CPU
+集合、8 MiB stack 不是充分触发条件。下一步需要记录 UE 任务标签、
+fault 前同一线程的任务/内存状态或其它 driver context，不能继续只
+重复线程参数。当前 GB10/Town10/RGB/LiDAR/长期运行仍 **BLOCKED**。
+
+### 9.97 2026-10-06（本地）暂停检查点与根因边界
+
+用户要求「先记录下来，后面再说」。本轮仅记录状态并暂停排查，
+**不新增 GPU 实验、构建或补丁应用**。以下区分故障位置、已测事实、
+未验证假设与恢复里程碑，纠正历史进度中把有限负向证据写成完整排除的表述。
+
+**主阻塞仍未解决**：完整 UE 进程在 GB10 / 驱动 580.173.02 上创建 Vulkan
+pipeline 时，于 `libnvidia-glvkspirv.so.580.173.02` 内 SIGSEGV。
+这确认了崩溃位置，不等于确认是驱动缺陷，也未确认 UE 误用或进程状态破坏。
+尚无稳定的最小失败复现，也无经过产品门禁验证的修复。
+
+**已有证据及其边界**：
+
+- 已捕获同进程设备配置与实际 API enter/return；同轮实际 shader/layout/cache/device
+  输入在独立进程中可创建 pipeline。置空 cache 后完整 UE 仍崩溃。
+- 已观察的 cache/module/layout 仍存活，未记录到故障时 cache 重叠；allocator 实测
+  为 NULL，与独立 replay 一致。这些记录不覆盖所有对象、所有竞争或潜在内存破坏。
+- loader 跟踪的 851 条 binding 中，仅标准 I/O 对象从 NVIDIA 驱动绑定到 UE，
+  ELF COPY relocation 已核对；未观察到 C++/LLVM/内存/线程函数被 UE 接管。
+  这不是对所有动态符号解析和进程内状态的排除。
+- 10 月 6 日 fault capture
+  `artifacts/carla/gb10-device-fault-20261006T030625Z-CmYWX4/` 记录
+  graphics 628 enter / 628 return、compute 4 enter / 3 return；
+  唯一未返回 compute 为 `main_00000290_c1eca148`。
+  fault thread 为 `Foregro-rker #1`、LWP 100、CPU 0、allowed CPU `0-19`，
+  SP mapping `e902ee2af000-e902eeaaf000` 约 8 MiB。
+  **`tpidr_el0=null` 是寄存器不可读，不是 TLS 内容已验证或为空。**
+- `artifacts/carla/vulkan-compute-worker-replay-20261006T0315/`
+  中，主线程约 0.011 s、`ForeReplay` / CPU 0 / 8 MiB stack 约 0.015 s 均 PASS。
+  输入为 **9 月 28 日归档**的 656-byte module / 21098-byte cache，
+  不是本次 10 月 6 日新捕获的 module；device snapshot SHA256 为
+  `b719168834c4b669107b90f4663c8e0f6b9b75798a885d4dfd4e7f3d8a5885cf`。
+  `ue_exact_replay=false`：独立 pthread 未复现真实 UE task graph/TLS/内存上下文，
+  不能据此宣布“worker 类别和 TLS 已排除”。
+
+上述对照降低了部分假设的优先级，**不能完整排除组合条件、时序、UE 状态破坏或驱动缺陷**。
+仍有技术调查路线，但在**驱动不可更换**的约束下，不能保证应用侧能解决。
+若最终确认为无应用侧绕法的驱动缺陷，需要厂商支持或验收路线决策；
+独立 replay PASS 本身既不证明应用侧不可修，也不证明产品可用。
+
+**停服缺陷是独立问题**：`GPUMessage::GSystem` 的 handler 表在静态析构时
+先于 socket 注销被销毁，根因见 9.91/9.92。
+`scripts/carla/patches/ue-gpumessaging-shutdown-guard.patch` 仍是
+**未应用、未验证修复效果的提案**，须维护者决定落点；它不解决启动期编译器崩溃。
+
+**恢复后的验收顺序**：
+
+1. 重建并最小化故障前 Vulkan 调用序列，补齐缺失的真实 UE 上下文，获得稳定失败复现。
+2. 做有判别力的单变量因果对照，实施并验证有证据支持的最小修复。
+3. Town10 世界就绪 → 同步 tick → RGB/LiDAR 有效数据与帧时对齐 → 长时间稳定运行。
+   停服提案另行决定、独立验证。没有判别实验时，不继续仅扩充日志。
+
+最近完整本地回归为 **837 tests / 56 skipped / 0 failures**，这是既有诊断与代码
+回归基线，**不是 GB10 产品验收**。本轮不重跑完整回归；暂停状态与恢复待办同步记录于
+`docs/carla-handoff.md` 和 `docs/carla-dgx-todo.md`。
+
+### 9.98 2026-10-07（本地）恢复排查：真实 UE 任务上下文已捕获
+
+用户要求继续后，本轮恢复 GPU 排查。目标是补齐真实 UE task context，
+不是重复 10 月 6 日已经完成的 worker 类别、CPU affinity 和 stack size 对照。
+本轮没有应用引擎停服 guard，也没有把任何诊断运行记为产品 PASS。
+
+**采集器改动**：
+
+- `gdb_vulkan_device_capture.py` 的 fault context schema 从 1 升为 2；
+  在 SIGSEGV/SIGBUS/SIGABRT 停点只做 GDB/procfs/进程内存只读读取，
+  不调用 inferior 函数。
+- 直接读取 `FTaskTagScope::ActiveTaskTag`，并按 UE `ETaskTag` 位定义解码；
+  读取 `LowLevelTasks::FTask::ActiveTask` 指针和其真实 typed `PackedData`
+  字段地址，再读取 8 字节 raw packed word。GDB 无法转换 libstdc++ atomic
+  wrapper，因此没有调用 `load()` 或其它 inferior 方法。
+- UE Linux `TCHAR` 是 `char16_t`，active task debug name 按 UTF-16LE 读取；
+  这修正了第一次 raw capture 的乱码。
+- `UE::Tasks::Private::CurrentTask` 同步尝试读取；当前优化构建返回
+  `value has been optimized out`，明确记录为不可用，而不是推断为空。
+
+**最终证据**：`artifacts/carla/gb10-device-fault-20261007T133547Z-fXVgwX/`。
+
+| 字段 | 实测值 |
+| --- | --- |
+| 结果 | `CAPTURED_FAULT`；GDB 进入 `libnvidia-glvkspirv.so.580.173.02` SIGSEGV |
+| driver markers | graphics `622/622`；compute `4/3` |
+| 未返回 compute | `main_0000142c_a6b37050` |
+| fault thread | `Backgro-rker #2`；LWP 由 `selected_ptid` 记录；processor `2` |
+| CPU/stack | allowed `0-19`；约 8 MiB stack mapping |
+| UE task tag | `ERenderingThread | EParallelThread`，raw `0x40000010` |
+| active low-level task | `GraphTask`；raw packed `0xc000000048eeaa06` |
+| TLS | `tpidr_el0=null`；不可读，不代表 TLS 为空 |
+| UE Tasks current task | optimized out；未取得地址 |
+
+同日其它成功捕获也落在 `Backgro-rker #3/#4/#8`，任务标签均为
+`ERenderingThread | EParallelThread`；这提高了“并行渲染 GraphTask 上下文”
+是稳定相关条件的可信度，但仍不是充分因果证据。线程类别本身不能再简化为
+“普通 worker”；任务标签、任务对象、调用前内存状态和 Vulkan driver context
+仍未组成 UE exact replay。
+
+**一次无效运行单独分类**：`gb10-device-fault-20261007T132205Z-vPG2n6`
+在 `vkCreateDevice` 后被拒绝，没有 pipeline markers，因此不纳入故障样本；
+其设备快照与后续成功轮的配置一致。设备 preflight 通过后，
+`20261007T133547Z-fXVgwX` 成功复现目标故障。
+
+为复用旧混合 pipeline 参数而使用当前正式 binary，本轮新增
+`CARLA_GB10_FAULT_BINARY` + 必须匹配的
+`CARLA_GB10_FAULT_EXPECTED_BINARY_SHA256` override；缺任一项会在启动前失败。
+同时新增 `make carla-gb10-device-fault`，把基线、binary 和 SHA256 作为显式输入，
+避免旧归档参数与当前 binary 被静默混用。
+
+**结论与下一步**：
+
+- 已完成“真实 UE 任务标签/active task 采集”这一子项；
+  `GraphTask` 仍只是故障发生时的上下文，不是根因。
+- 下一项不是继续堆日志，而是把 `GraphTask`/task tag 与未返回
+  `vkCreateComputePipelines` 的同轮 driver-entry、shader/cache/layout 以及
+  调用前有界内存状态关联，做至少一个单变量对照。
+- 主阻塞仍是启动期 NVIDIA shader compiler SIGSEGV；Town10/RGB/LiDAR/长时
+  GB10 产品验收仍 BLOCKED。独立 replay PASS 仍不能证明应用侧不可修。
+
+本轮验证：`make test-local` → **840 tests / 0 failures / 56 skipped**；
+这是代码与诊断回归，不是 GB10 产品验收。
+
+### 9.99 2026-10-07（本地）把 UE task context 关联到未返回 driver-entry
+
+9.98 已能在 GDB fault stop 读到真实 UE task context，但还没有证明该 context
+就是未返回 compute 的调用上下文。本轮在已有 `CarlaPipelineHistory` marker
+路径上加入低扰动字段：
+
+- `task_tag`：`FTaskTagScope::GetCurrentTag()` 的 raw 位值；
+- `low_level_task`：`LowLevelTasks::FTask::GetActiveTask()` 地址；
+- `low_level_task_name`：active task debug name，换行被替换为 `_`。
+
+字段只在 `-CarlaVulkanPipelineHistory=...` 诊断开启时写入；默认产品路径不变。
+新增 source 改动尚未提交，当前 UE fork 只脏 1 个文件；正式 stage/binary
+仍未改。增量构建证据：`artifacts/carla/carla-ue-20261007T135256Z-Ck6Tal/`，
+诊断 binary SHA256 为
+`c9defcb3ee951ef3e7da09230f030921f8c1cfc99cea0a073633b9c72d99a3e8`。
+
+**同轮关联证据**：`artifacts/carla/gb10-device-fault-20261007T141134Z-EhSbfe/`。
+
+| compute marker | thread | task tag | active task | 结果 |
+| --- | ---: | --- | --- | --- |
+| `main_00000628_26d5e8e8` | 166 | `0x00000020` (`ERhiThread`) | `0x0` / `none` | returned |
+| `main_00000638_c4bd1ff5` | 166 | `0x00000020` (`ERhiThread`) | `0x0` / `none` | returned |
+| `main_0000061c_2462ec74` | 166 | `0x00000020` (`ERhiThread`) | `0x0` / `none` | returned |
+| `main_0000142c_a6b37050` | **116** | `0x40000010` (`ERenderingThread | EParallelThread`) | **`GraphTask`** | **未返回，SIGSEGV** |
+
+GDB fault context 同轮记录 `Backgro-rker #3` 的 LWP **116**、CPU 12、allowed CPU
+`0-19`、约 8 MiB stack，task tag 同为 `ERenderingThread | EParallelThread`，
+active task 同为 `GraphTask`。因此这不是仅凭线程名的推测：未返回 driver-entry
+与 fault stop 的 OS 线程和 UE task context 一一对应。
+
+这把候选因果范围进一步收窄为：同一进程、同一 cache/layout 策略下，前三次
+compute 在 `ERhiThread` 上返回，第四次在并行渲染 `GraphTask` 上崩溃。
+它仍然不是充分根因证明：task context 可能只是更深层状态/时序的代理变量，
+调用前内存状态和完整 UE task graph 仍未重放。
+
+`analyze_vulkan_driver_entries.py` 现在会校验并把未返回 compute 的
+`thread/task_context` 保留在 `driver-entry-analysis.json`；缺字段、部分字段、
+非法指针/标签或超长任务名会 fail closed。
+
+**下一步**：在不重复线程参数实验的前提下，采集未返回 compute 调用前的有界内存/
+对象状态，并与前三次 `ERhiThread` compute 做单变量对照；随后才判断是否能实施
+最小应用侧绕法。停服 guard 仍未应用，GB10 产品验收仍 BLOCKED。

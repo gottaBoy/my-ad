@@ -1764,6 +1764,55 @@
         "No other SM6 cache on disk carries that digest, so the corrected value was not copied from a sibling artifact"
       ],
       "boundary": "Only the recorded digest and size change. The cache remains an untracked artifacts/ file, so a fresh clone cannot re-verify it. The companion cooked-client-full/Engine/GlobalShaderCache-VULKAN_SM6.bin, 53757589 bytes with sha256 cc2003758ea421d74930c8c32abc3936d1d6e95b8251b3c5a88d27c5f100717d, is a different file that the full cook produces."
+    },
+    {
+      "id": "gb10-loader-binding-runtime-context",
+      "category": "vulkan-diagnostics",
+      "change": "Add opt-in server-only LD_DEBUG=bindings capture and a bounded, fail-closed analyzer with PID/executable checks, raw-log hashes and concatenated-thread output handling. Recheck current GB10 availability and the same-input isolated compute replay.",
+      "reason": "Independent PSO creation passes while full UE crashes. Inspect actual driver symbol providers instead of assuming main-executable exports corrupt compiler, allocator or thread functions. GPU is currently reachable, so the handoff must not assert that local experiments are impossible.",
+      "paths": [
+        "Makefile",
+        "scripts/carla/probe-town10-gb10-runtime.sh",
+        "scripts/carla/analyze_vulkan_loader_bindings.py",
+        "tests/test_carla_vulkan_loader_bindings.py",
+        "tests/test_carla_gb10_runtime.py",
+        "docs/carla-dgx-audit.md",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-handoff.md"
+      ],
+      "validation": [
+        "2026-10-05 native GB10 / 580.173.02 baseline town10-gb10-rpc-20261005T143823Z-BBzto1 reproduces compiler SIGSEGV, stop 139, not device-creation failure",
+        "Final trace town10-gb10-rpc-20261005T151630Z-cArNz3 reproduces the same compiler fault; analyzer exit 0 records 851 driver bindings",
+        "Observed driver-to-client symbols are only stdin/stdout/stderr; corresponding ELF COPY relocations verified; no observed C++/LLVM/allocator/thread function binds to CarlaUnreal",
+        "vulkan-compute-recheck-20261005T1517Z-84VLLa passes with hash-verified archived device, shader and cache inputs; isolated creation remains ue_exact_replay=false",
+        "make test-local: 837 tests, 56 skipped, 0 failures; both fork worktrees remain clean"
+      ],
+      "boundary": "Only observed glibc loader bindings for glvkspirv/eglcore are summarized. Trace changes timing and does not exclude all manual symbol resolution, other libraries or driver/UE context faults. No product repair, driver change or shutdown-guard application; GB10 runtime gates remain BLOCKED."
+    },
+    {
+      "id": "gb10-fault-thread-context-worker-replay",
+      "category": "vulkan-diagnostics",
+      "change": "Capture read-only fault-thread procfs/register context and add an isolated compute replay mode that runs vkCreateComputePipelines on a named pthread with bounded stack and CPU affinity.",
+      "reason": "Full UE faults on Foreground/Background workers while isolated replay previously ran on main; compare thread execution environment without calling inferior functions.",
+      "paths": [
+        "scripts/carla/gdb_vulkan_device_capture.py",
+        "scripts/carla/probe-gb10-device-fault.sh",
+        "scripts/carla/vulkan-compute-replay.c",
+        "scripts/carla/probe-vulkan-compute-replay.sh",
+        "tests/test_carla_gb10_device_fault.py",
+        "tests/test_carla_vulkan_pipeline_snapshot.py",
+        "tests/test_carla_vulkan_fault_context.py",
+        "docs/carla-dgx-audit.md",
+        "docs/carla-dgx-todo.md",
+        "docs/carla-handoff.md"
+      ],
+      "validation": [
+        "GB10 fault-context 20261006T030625Z-CmYWX4: Foreground worker #1, LWP 100, CPU 0, allowed CPU 0-19, approximately 8 MiB stack mapping, NVIDIA compiler SIGSEGV",
+        "Same exact compute inputs on main thread PASS at about 0.011 s",
+        "Same exact compute inputs on ForeReplay pthread CPU 0 with 8 MiB stack PASS at about 0.015 s",
+        "Fault-context and worker replay unit tests pass; full local regression 837 tests, 56 skipped, 0 failures"
+      ],
+      "boundary": "Worker name/category, CPU affinity and stack size are not sufficient triggers. TLS/UE task tag may be unavailable at signal stop, and the isolated worker lacks full UE task graph/memory/driver context. No product fix or runtime acceptance."
     }
   ]
 }

@@ -1,8 +1,12 @@
+#define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #include <vulkan/vulkan.h>
 #include "spirv_reflect.h"
 #include <stdbool.h>
 #include <ctype.h>
+#include <errno.h>
+#include <pthread.h>
+#include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,6 +100,46 @@ typedef struct {
     VkDescriptorSetLayout sets[MAX_SETS];
     uint32_t set_count;
 } HistoryPipeline;
+
+typedef struct {
+    VkDevice device;
+    VkPipelineCache cache;
+    const VkComputePipelineCreateInfo *info;
+    VkPipeline *pipeline;
+    VkResult result;
+    const char *name;
+    int cpu;
+} DriverThreadCreate;
+
+static void *driver_thread_create(void *opaque)
+{
+    DriverThreadCreate *request = opaque;
+    if (pthread_setname_np(pthread_self(), request->name) != 0) {
+        request->result = VK_ERROR_INITIALIZATION_FAILED;
+        return NULL;
+    }
+    if (request->cpu >= 0) {
+        cpu_set_t set;
+        CPU_ZERO(&set);
+        CPU_SET(request->cpu, &set);
+        if (pthread_setaffinity_np(pthread_self(), sizeof(set), &set) != 0) {
+            request->result = VK_ERROR_INITIALIZATION_FAILED;
+            return NULL;
+        }
+    }
+    request->result = vkCreateComputePipelines(
+        request->device, request->cache, 1, request->info, NULL, request->pipeline);
+    return NULL;
+}
+
+static int parse_cpu(const char *text)
+{
+    char *end = NULL;
+    long value = strtol(text, &end, 10);
+    if (!text[0] || !end || *end || value < 0 || value >= CPU_SETSIZE)
+        return -1;
+    return (int)value;
+}
 
 static VkDescriptorType descriptor_type_name(const char *name)
 {
@@ -301,11 +345,13 @@ int main(int argc, char **argv)
     if (argc < 5 ||
         (strcmp(argv[2], "lavapipe") && strcmp(argv[2], "gb10")) ||
         (strcmp(argv[4], "create") && strcmp(argv[4], "smoke"))) {
-        fprintf(stderr, "Usage: vulkan-compute-replay SHADER lavapipe|gb10 ENTRY|- create|smoke [--ue-layout FILE] [--pipeline-cache FILE 0|1] [--history FILE]\n");
+        fprintf(stderr, "Usage: vulkan-compute-replay SHADER lavapipe|gb10 ENTRY|- create|smoke [--ue-layout FILE] [--pipeline-cache FILE 0|1] [--history FILE] [--driver-thread NAME CPU]\n");
         return 64;
     }
     const char *layout_file = NULL, *cache_file = NULL;
     const char *history_file = NULL;
+    const char *driver_thread_name = NULL;
+    int driver_thread_cpu = -1;
     VkPipelineCacheCreateFlags cache_flags = 0;
     for (int i = 5; i < argc;) {
         if (!strcmp(argv[i], "--ue-layout") && !layout_file && i + 1 < argc) {
@@ -319,6 +365,16 @@ int main(int argc, char **argv)
         } else if (!strcmp(argv[i], "--history") && !history_file && i + 1 < argc) {
             history_file = argv[i + 1];
             i += 2;
+        } else if (!strcmp(argv[i], "--driver-thread") && !driver_thread_name && i + 2 < argc
+                   && strlen(argv[i + 1]) > 0 && strlen(argv[i + 1]) < 16) {
+            int cpu = parse_cpu(argv[i + 2]);
+            if (cpu < 0) {
+                fprintf(stderr, "Invalid driver thread CPU: %s\n", argv[i + 2]);
+                return 64;
+            }
+            driver_thread_name = argv[i + 1];
+            driver_thread_cpu = cpu;
+            i += 3;
         } else {
             fprintf(stderr, "Invalid or duplicate replay option: %s\n", argv[i]);
             return 64;
@@ -603,7 +659,29 @@ int main(int argc, char **argv)
     }
     fprintf(stderr, "BEGIN pipeline-create entry=%s bytes=%ld\n", entry_name, size);
     double begin = seconds();
-    CHECK(vkCreateComputePipelines(device, pipeline_cache, 1, &pipeline_info, NULL, &pipeline));
+    if (driver_thread_name) {
+        pthread_attr_t attributes;
+        pthread_t thread;
+        DriverThreadCreate request = {
+            .device = device, .cache = pipeline_cache, .info = &pipeline_info,
+            .pipeline = &pipeline, .result = VK_ERROR_INITIALIZATION_FAILED,
+            .name = driver_thread_name, .cpu = driver_thread_cpu,
+        };
+        if (pthread_attr_init(&attributes) != 0
+            || pthread_attr_setstacksize(&attributes, 8 * 1024 * 1024) != 0
+            || pthread_create(&thread, &attributes, driver_thread_create, &request) != 0) {
+            fprintf(stderr, "Failed to create configured driver thread\n");
+            pthread_attr_destroy(&attributes);
+            goto cleanup;
+        }
+        pthread_attr_destroy(&attributes);
+        if (pthread_join(thread, NULL) != 0 || request.result != VK_SUCCESS) {
+            fprintf(stderr, "Worker vkCreateComputePipelines failed: %d\n", (int)request.result);
+            goto cleanup;
+        }
+    } else {
+        CHECK(vkCreateComputePipelines(device, pipeline_cache, 1, &pipeline_info, NULL, &pipeline));
+    }
     double pipeline_seconds = seconds() - begin;
     fprintf(stderr, "END pipeline-create seconds=%.6f\n", pipeline_seconds);
 
@@ -721,7 +799,13 @@ int main(int argc, char **argv)
     printf(",\"pipeline_cache_initial_bytes\":%zu,\"pipeline_cache_flags\":%u",
            cache_size, cache_flags);
     printf(",\"history_pipeline_count\":%u,\"ue_shader_header_reused\":false,"
-           "\"queue_family\":%u,\"descriptor_sets\":[", history_count, family);
+           "\"driver_thread\":", history_count);
+    if (driver_thread_name) json_string(driver_thread_name);
+    else printf("null");
+    printf(",\"driver_cpu\":%d,\"driver_stack_bytes\":%u",
+           driver_thread_name ? driver_thread_cpu : -1,
+           driver_thread_name ? 8 * 1024 * 1024 : 0);
+    printf(",\"queue_family\":%u,\"descriptor_sets\":[", family);
     for (uint32_t s = 0; s < set_count; ++s) {
         if (s) putchar(',');
         printf("{\"set\":%u,\"bindings\":[", s);
