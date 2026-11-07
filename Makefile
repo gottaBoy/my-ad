@@ -62,6 +62,28 @@ replay:
 viz:
 	$(DGX_COMPOSE) --profile viz up -d foxglove-bridge
 
+.PHONY: waymax-check waymax-baseline waymax-learning waymax-evaluate waymax-verify test-waymax
+waymax-check:
+	bash scripts/waymax/run-cpu.sh --stage inventory
+
+waymax-baseline:
+	bash scripts/waymax/run-cpu.sh --stage baseline
+
+waymax-learning:
+	bash scripts/waymax/run-cpu.sh --stage all
+
+waymax-evaluate:
+	@test -n "$(WAYMAX_RUN)" || { echo "WAYMAX_RUN is required"; exit 64; }
+	bash scripts/waymax/run-cpu.sh --reload-run "$(WAYMAX_RUN)"
+
+waymax-verify:
+	@test -n "$(WAYMAX_RUN)" || { echo "WAYMAX_RUN is required"; exit 64; }
+	python3 scripts/waymax/verify_learning_run.py "$(WAYMAX_RUN)"
+
+test-waymax:
+	python3 -m unittest discover -s tests -p 'test_waymax_*.py' -v
+	bash -n scripts/waymax/run-cpu.sh
+
 carla-config:
 	$(CARLA_COMPOSE) --profile '*' config --quiet
 

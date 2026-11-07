@@ -2,6 +2,11 @@
 
 校核日期：2026-09-11
 
+路线补记：2026-11-07。暂停本机 CARLA GPU 实验，当前恢复
+[Waymax CPU 小数据计划](waymax-learning-plan.md)；
+实测与学习入口见[学习手册](waymax-learning-lab.md)。
+下方 9 月状态表保留为历史证据，不应当作今天正在运行的服务清单。
+
 本文把本仓库的 Autoware 运行方式和后续仿真、感知、训练路线分开记录。
 每一级都说明它证明了什么、没有证明什么，以及下一步如何执行。不要用较低
 级别的 `PASS` 替代更高级别的闭环证据。
@@ -43,10 +48,10 @@ L0 环境证据
 能够在 DGX Spark 上运行；它不能证明 AWSIM、相机、LiDAR、完整感知、跨主机
 网络或真实传感器闭环。
 
-当前学习主线临时切换到 CARLA。DGX Spark 只有 ARM64，因此 CARLA 路线必须先
-通过独立的 Docker/源码 Gate；详细 fork、分支、bridge、Autoware 和 native ROS 2
-边界见 [`carla-dgx-audit.md`](carla-dgx-audit.md)。这不改变现有 AWSIM、Scenario
-Simulator 或 Autoware runtime 的证据状态。
+上述编号用于区分能力与证据，不是所有路线必须依次通过的依赖链。
+当前 Waymax CPU 路线不需要 CARLA 先通过。CARLA 的 ARM64 构建与 GPU 诊断
+边界仍见 [`carla-dgx-audit.md`](carla-dgx-audit.md)，它的暂停不抹除其它路线
+已有证据，也不把它们升级为完整传感器闭环。
 
 各例子与学习模块的对应关系如下：
 
@@ -57,6 +62,7 @@ Simulator 或 Autoware runtime 的证据状态。
 | AWSIM / CARLA | 原始传感器 | 可运行 | 可运行 | 可运行 | 可运行 | 可闭环 |
 | rosbag 回放 | 可重复输入 | 可重复调试 | 可重复调试 | 可重复调试 | 可重复调试 | 可重复调试 |
 | NAVSIM | 离线输入 | 数据提供 | 离线输入 | 取决于 Agent | 离线评测 | 不直接接入 |
+| Waymax CPU 小数据实验 | 对象状态，不生成传感器 | 数据提供 | 不训练原始感知 | 不负责 | expert/学习策略状态仿真 | 简化动力学动作 |
 | BEVFormer | 图像输入 | 依赖外部 TF | 模型主体 | 可扩展 | 不负责 | 不负责 |
 | Isaac Lab + RL | 环境状态 | 环境提供 | 不负责 | 不负责 | 可训练 | 可训练 |
 

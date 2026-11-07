@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "source_root": "../waymax-my",
+  "data_file": "../waymax/waymax/dataloader/testdata/tfrecord_with_routes",
+  "num_scenarios": 2,
+  "max_num_objects": 32,
+  "max_num_rg_points": 30000,
+  "num_paths": 30,
+  "num_points_per_path": 200,
+  "init_steps": 11,
+  "rollout_steps": 80,
+  "seed": 0,
+  "training_updates": 300,
+  "hidden_units": 32,
+  "learning_rate": 0.01,
+  "metrics": [
+    "log_divergence",
+    "overlap",
+    "offroad",
+    "kinematic_infeasibility"
+  ]
+}

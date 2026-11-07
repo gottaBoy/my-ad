@@ -24,6 +24,13 @@ Autoware 在线闭环或 Scenario Simulator。
 不同运行模式以及 NAVSIM、CARLA、BEVFormer、Isaac Lab、RL 的分级执行路线见
 [`docs/simulation-modes.md`](docs/simulation-modes.md)。
 
+本地小数据学习另有纯 CPU 的 Waymax 路线，不依赖 CARLA 或 GPU 渲染：
+先看[步骤计划](docs/waymax-learning-plan.md)与[学习手册](docs/waymax-learning-lab.md)，
+使用 `make waymax-check`、`make waymax-baseline`、`make waymax-learning` 逐级运行。
+它验证对象状态仿真与最小行为克隆工程链路，不替代原始传感器或 Autoware 验收。
+系统学习按[30 天计划](docs/waymax-learning-30-days.md)推进，
+每天在[学习日志](docs/learning/waymax-30-days/README.md)记录操作、证据和结论。
+
 ## 目录
 
 ```text
@@ -40,10 +47,11 @@ artifacts/                 # Harness 证据
 docs/                      # 方案和验证文档
 ```
 
-当前学习主线临时优先从 CARLA 开始。DGX Spark 的 Docker、ARM64、fork、native
-ROS 2、Autoware bridge 和分阶段 Gate 见 [`docs/carla-dgx-audit.md`](docs/carla-dgx-audit.md)。
-CARLA 通过后，再按 sensing、localization、perception、fusion、planning、control
-阅读 [`docs/autoware-learning-lab.md`](docs/autoware-learning-lab.md)。
+2026-11-07 起暂停本机 CARLA GPU 实验，当前小数据学习主线为 Waymax CPU。
+CARLA 历史构建和诊断仍保存在 [`docs/carla-dgx-audit.md`](docs/carla-dgx-audit.md)，
+不作为 Waymax 的前置条件。sensing、localization、perception、fusion、
+planning、control 的其它学习路线见
+[`docs/autoware-learning-lab.md`](docs/autoware-learning-lab.md)。
 
 ## 前置条件
 
