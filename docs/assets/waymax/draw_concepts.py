@@ -130,8 +130,130 @@ def experiments_diagram():
     image.save(ROOT / "three-experiments.png")
 
 
+def record_hierarchy_diagram():
+    image = Image.new("RGB", (1500, 1090), "#ffffff")
+    draw = ImageDraw.Draw(image)
+    text(draw, (55, 25), "Day 03：一段场景，包含对象、地图和一段时间", 37)
+    text(draw, (55, 90), "结构为教学示意；数字来自本地文件前两条记录的只读核对。", 23, MUTED)
+    text(draw, (55, 155), "1 个 TFRecord 文件", 30, BLUE)
+    arrow(draw, (400, 178), (570, 178), BLUE)
+    text(draw, (605, 155), "本课只取前 2 条 record，不能推断全文件只有 2 条。", 25)
+    draw.line((55, 235, 1445, 235), fill="#d6dce0", width=2)
+    text(draw, (55, 258), "看什么", 27)
+    text(draw, (660, 258), "场景 0", 30, BLUE)
+    text(draw, (1100, 258), "场景 1", 30, GREEN)
+    rows = [
+        ("原始字段名数量（不是车辆数）", "125", "125"),
+        ("预留对象槽位（不是都有效）", "128", "128"),
+        ("current 帧有效对象", "6", "14"),
+        ("本实验选取的对象槽位上限", "前 32 槽", "前 32 槽"),
+        ("时间帧：过去 + 当前 + 未来", "10 + 1 + 80", "10 + 1 + 80"),
+        ("地图点槽位（不是道路条数）", "30000", "30000"),
+        ("其中有效地图点", "12680", "10154"),
+    ]
+    for index, (label, first, second) in enumerate(rows):
+        y = 335 + index * 72
+        text(draw, (55, y), label, 25)
+        text(draw, (660, y), first, 27, BLUE)
+        text(draw, (1100, y), second, 27, GREEN)
+        draw.line((55, y + 56, 1445, y + 56), fill="#edf0f2", width=1)
+    text(draw, (55, 885), "一个场景 ≠ 一辆车 ≠ 一个时刻", 32)
+    text(draw, (55, 945), "槽位像登记表的空行；valid 告诉我们哪一行在这一帧能用。", 26, MUTED)
+    text(draw, (55, 997), "90000 个 xyz 数值 ÷ 每点 3 个坐标 = 30000 个地图点槽位。", 26, MUTED)
+    image.save(ROOT / "record-hierarchy.png")
+
+
+def reset_step_diagram():
+    image = Image.new("RGB", (1500, 1100), "#ffffff")
+    draw = ImageDraw.Draw(image)
+    text(draw, (55, 25), "Day 04：reset 摆好起点，step 再向前推进", 37)
+    text(draw, (55, 88), "教学时间轴：复用已有 baseline 的索引，不是新仿真截图。", 23, MUTED)
+
+    text(draw, (55, 155), "原始记录：91 帧，从索引 0 数到 90", 30)
+    segments = [
+        (55, 535, BLUE, "过去：0 ... 9", "10 帧"),
+        (555, 865, GREEN, "当前：10", "1 帧"),
+        (885, 1445, RED, "未来参考：11 ... 90", "80 帧"),
+    ]
+    for left, right, color, label, count in segments:
+        draw.line((left, 230, right, 230), fill=color, width=7)
+        text(draw, (left + 15, 250), label, 27, color)
+        text(draw, (left + 15, 300), count, 24, MUTED)
+    text(draw, (55, 365), "reset：把前 11 帧填入仿真记录，当前指针停在 10；未来仿真尚未完成。", 26)
+    draw.line((55, 430, 1445, 430), fill="#d6dce0", width=2)
+
+    text(draw, (55, 455), "同一次 rollout：本轮步数与场景索引分开数", 30)
+    columns = [
+        (55, BLUE, "reset 完成", "step 次数：0", "timestep：10", "相对起点：0 秒"),
+        (430, GREEN, "第 1 次推进后", "step 次数：1", "timestep：11", "相对起点：0.1 秒"),
+        (805, GREEN, "第 2 次推进后", "step 次数：2", "timestep：12", "相对起点：0.2 秒"),
+        (1180, RED, "第 80 次后", "step 次数：80", "timestep：90", "相对起点：8 秒"),
+    ]
+    for x, color, heading, steps, timestep, elapsed in columns:
+        text(draw, (x, 525), heading, 27, color)
+        text(draw, (x, 583), steps, 24)
+        text(draw, (x, 630), timestep, 24)
+        text(draw, (x, 677), elapsed, 24, MUTED)
+    for left, right in ((300, 395), (675, 770), (1050, 1145)):
+        arrow(draw, (left, 550), (right, 550))
+    text(draw, (1030, 505), "省略中间步骤", 19, MUTED)
+    draw.line((55, 750, 1445, 750), fill="#d6dce0", width=2)
+    text(draw, (55, 785), "一次推进：当前状态 + 动作 → 动力学 → 下一状态 → 保存 CSV 一行", 29, GREEN)
+    text(draw, (55, 845), "CSV 动作列 = 这次用了什么动作；位置与指标 = 该动作执行后的结果。", 25)
+    text(draw, (55, 912), "80 次 × 0.1 秒 = 8 秒模拟时间，不等于电脑实际耗时。", 28)
+    text(draw, (55, 980), "is_done=true：到达记录末尾。不是“没有越界”，更不是驾驶安全验收。", 25, RED)
+    image.save(ROOT / "reset-step-timeline.png")
+
+
+def action_units_diagram():
+    image = Image.new("RGB", (1500, 1100), "#ffffff")
+    draw = ImageDraw.Draw(image)
+    text(draw, (55, 25), "Day 05：动作是两个有单位的数", 37)
+    text(draw, (55, 88), "本地图示使用 bicycle model；不是方向盘、摄像头或真实车辆控制器。", 23, MUTED)
+
+    text(draw, (55, 160), "策略输出 Action", 30, BLUE)
+    draw.rounded_rectangle((55, 220, 610, 400), radius=12, fill="#eef5fb", outline=BLUE, width=3)
+    text(draw, (90, 245), "[ acceleration, steering curvature ]", 27, BLUE)
+    text(draw, (90, 305), "[ 加速度,       转向曲率       ]", 27)
+    text(draw, (90, 355), "两个连续数，不是左/右/停三个按钮。", 22, MUTED)
+
+    arrow(draw, (650, 310), (820, 310), BLUE)
+    text(draw, (680, 260), "dt = 0.1 秒", 22, MUTED)
+
+    text(draw, (850, 160), "物理单位与边界", 30, GREEN)
+    draw.rounded_rectangle((850, 220, 1445, 400), radius=12, fill="#eef8f3", outline=GREEN, width=3)
+    text(draw, (885, 245), "accel：[-6, 6] m/s^2", 27, GREEN)
+    text(draw, (885, 305), "curvature：[-0.3, 0.3] m^-1", 27, GREEN)
+    text(draw, (885, 355), "超出边界会先 clip（裁剪）。", 22, MUTED)
+
+    draw.line((55, 455, 1445, 455), fill="#d6dce0", width=2)
+    text(draw, (55, 490), "两条计算方向", 30)
+    text(draw, (55, 560), "Forward dynamics", 28, GREEN)
+    text(draw, (55, 610), "当前状态 + 动作", 25)
+    arrow(draw, (295, 625), (415, 625), GREEN)
+    text(draw, (450, 610), "计算下一状态", 25)
+    arrow(draw, (670, 625), (790, 625), GREEN)
+    text(draw, (825, 610), "x/y/yaw/velocity", 25, GREEN)
+
+    text(draw, (55, 720), "Inverse dynamics", 28, RED)
+    text(draw, (55, 770), "当前状态 + 日志下一帧", 25)
+    arrow(draw, (335, 785), (455, 785), RED)
+    text(draw, (490, 770), "反推 accel/curvature", 25)
+    arrow(draw, (735, 785), (855, 785), RED)
+    text(draw, (890, 770), "expert 参考动作", 25, RED)
+
+    draw.line((55, 855, 1445, 855), fill="#d6dce0", width=2)
+    text(draw, (55, 890), "训练时：物理动作 ÷ [6.0, 0.3] → 归一化标签 [-1, 1]", 27, BLUE)
+    text(draw, (55, 945), "执行前：模型输出 × [6.0, 0.3] → 恢复物理动作", 27, BLUE)
+    text(draw, (55, 1000), "固定 brake：[-2.0 m/s^2, 0.0 m^-1]，只用于动作因果对照，不是安全控制器。", 24, RED)
+    image.save(ROOT / "action-units.png")
+
+
 if __name__ == "__main__":
     ROOT.mkdir(parents=True, exist_ok=True)
     roles_diagram()
     experiments_diagram()
-    print("Wrote two static learning diagrams; no simulator or GPU was initialized.")
+    record_hierarchy_diagram()
+    reset_step_diagram()
+    action_units_diagram()
+    print("Wrote five static learning diagrams; no simulator or GPU was initialized.")

@@ -35,6 +35,9 @@ Autoware 在线闭环或 Scenario Simulator。
 然后看[第一轮 expert 基线讲解](docs/waymax-first-baseline-walkthrough.md)。
 本机结果按[保留与归档规则](docs/waymax-artifact-retention.md)整理，
 当前三个主要结果的入口是 `artifacts/waymax/README.md`。
+Waymax 之后的 C++、车辆模型、控制器、ROS 2、评测和求职强化路线见
+[就业强化课程包](docs/learning/autodrive-job-track/README.md)；
+总览仍在[从 Waymax 到初级岗位](docs/learning/autodrive-job-track.md)。
 
 ## 目录
 

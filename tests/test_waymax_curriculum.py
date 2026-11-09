@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+import csv
 import hashlib
 import importlib.util
 import json
@@ -72,13 +73,19 @@ class WaymaxCurriculumTest(unittest.TestCase):
         paths = [
             PLAN, JOURNAL, JOURNAL.parent / "TEMPLATE.md",
             JOURNAL.parent / "preparation-20261107.md",
+            ROOT / "docs/learning/autodrive-job-track.md",
+            ROOT / "docs/learning/autodrive-job-track/README.md",
+            ROOT / "docs/learning/autodrive-job-track/TEMPLATE.md",
             JOURNAL.parent / "day-01.md", ROOT / "docs/waymax-concepts-illustrated.md",
             JOURNAL.parent / "day-02.md",
+            JOURNAL.parent / "day-03.md",
+            JOURNAL.parent / "day-04.md",
             ROOT / "docs/waymax-reading-first-output.md",
             ROOT / "docs/waymax-files-explained.md",
             ROOT / "docs/waymax-first-baseline-walkthrough.md",
             ROOT / "docs/waymax-artifact-retention.md",
         ]
+        paths.extend(JOURNAL.parent / f"day-{day:02d}.md" for day in range(1, 31))
         for path in paths:
             for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", path.read_text()):
                 target = target.split("#", 1)[0]
@@ -117,6 +124,9 @@ class WaymaxCurriculumTest(unittest.TestCase):
         for name, size in (
             ("roles-and-step.png", (1500, 1080)),
             ("three-experiments.png", (1500, 1130)),
+            ("record-hierarchy.png", (1500, 1090)),
+            ("reset-step-timeline.png", (1500, 1100)),
+            ("action-units.png", (1500, 1100)),
         ):
             data = (ROOT / "docs/assets/waymax" / name).read_bytes()
             self.assertGreater(len(data), 10000)
@@ -146,6 +156,120 @@ class WaymaxCurriculumTest(unittest.TestCase):
                    if line.startswith("| 02 |"))
         self.assertIn("NOT_STARTED", row)
         self.assertIn("day-02.md", row)
+
+    def test_day_three_separates_fields_slots_frames_and_valid_objects(self):
+        text = (JOURNAL.parent / "day-03.md").read_text()
+        for token in (
+            "IN_PROGRESS", "NOT_RUN", "NOT_VERIFIED", "只读",
+            "本课只读前两条", "125", "128", "32", "6", "14",
+            "10 帧过去", "80 帧未来", "91 帧", "不是车辆数量",
+            "30000", "不是严格盲测", "record_sha256", "data_sha256",
+            "未初始化 JAX 后端", "没有新增实验运行目录",
+        ):
+            self.assertIn(token, text)
+        row = next(line for line in JOURNAL.read_text().splitlines()
+                   if line.startswith("| 03 |"))
+        self.assertIn("IN_PROGRESS", row)
+        self.assertIn("day-03.md", row)
+
+    def test_day_four_separates_reset_step_and_simulation_time(self):
+        text = (JOURNAL.parent / "day-04.md").read_text()
+        for token in (
+            "2026-11-08（Asia/Singapore）", "IN_PROGRESS", "NOT_RUN", "NOT_VERIFIED",
+            "READING_ONLY", "没有初始化 JAX/TF/GPU", "不必重跑",
+            "log_trajectory", "sim_trajectory", "init_steps=11", "dt=0.1",
+            "timestep = 10 + n", "80 次推进 = 8 秒模拟时间，不是 80 秒",
+            "之后", "is_done=true", "不是驾驶安全验收", "同一个 reset 起点",
+            "learning-20261107T163242Z-3nn37_xl", "独立运行要求仍保留",
+        ):
+            self.assertIn(token, text)
+        row = next(line for line in JOURNAL.read_text().splitlines()
+                   if line.startswith("| 04 |"))
+        self.assertIn("2026-11-08 | IN_PROGRESS", row)
+        self.assertIn("day-04.md", row)
+
+    def test_local_day_four_baseline_has_expected_timeline(self):
+        run = ROOT / "artifacts/waymax/learning-20261107T163242Z-3nn37_xl"
+        if not run.is_dir():
+            self.skipTest("no local baseline; artifacts/ is gitignored")
+        config = json.loads((run / "config.json").read_text())
+        for name in ("expert-0", "expert-1"):
+            directory = run / name
+            summary = json.loads((directory / "summary.json").read_text())
+            with (directory / "trajectory.csv").open(newline="") as stream:
+                rows = list(csv.DictReader(stream))
+            initial = config["init_steps"] - 1
+            steps = config["rollout_steps"]
+            self.assertEqual(10, initial)
+            self.assertEqual(80, steps)
+            self.assertEqual(initial, summary["initial_timestep"])
+            self.assertEqual(initial + steps, summary["final_timestep"])
+            self.assertEqual(steps, summary["steps"])
+            self.assertEqual(steps, len(rows))
+            self.assertIs(summary["is_done"], True)
+            self.assertEqual(list(range(1, steps + 1)),
+                             [int(row["step"]) for row in rows])
+            self.assertEqual(list(range(initial + 1, initial + steps + 1)),
+                             [int(row["timestep"]) for row in rows])
+
+    def test_day_five_explains_physical_and_normalized_actions(self):
+        text = (JOURNAL.parent / "day-05.md").read_text()
+        for token in (
+            "2026-11-08（Asia/Singapore）", "IN_PROGRESS", "NOT_RUN", "NOT_VERIFIED",
+            "READING_ONLY", "accel_m_s2", "steering_curvature_m_inv", "m/s²", "m⁻¹",
+            "[-6.0, 6.0]", "[-0.3, 0.3]", "方向盘角度", "dt=0.1",
+            "timestep+1", "inverse dynamics", "forward dynamics", "action_scale",
+            "normalized_target", "[-2.0 m/s², 0.0 m⁻¹]", "不是安全控制器",
+            "没有新增 RUN_DIR", "learning-20261107T163242Z-3nn37_xl",
+        ):
+            self.assertIn(token, text)
+        row = next(line for line in JOURNAL.read_text().splitlines()
+                   if line.startswith("| 05 |"))
+        self.assertIn("2026-11-08 | IN_PROGRESS", row)
+        self.assertIn("day-05.md", row)
+
+    def test_remaining_day_lessons_are_recorded_without_auto_completion(self):
+        for day in range(6, 31):
+            text = (JOURNAL.parent / f"day-{day:02d}.md").read_text()
+            self.assertIn("NOT_STARTED", text, day)
+            self.assertIn("NOT_RUN", text, day)
+            self.assertIn("NOT_VERIFIED", text, day)
+            row = next(line for line in JOURNAL.read_text().splitlines()
+                       if line.startswith(f"| {day:02d} |"))
+            self.assertIn(f"day-{day:02d}.md", row)
+            self.assertIn("NOT_STARTED", row)
+
+    def test_job_track_is_practical_and_does_not_claim_job_readiness(self):
+        text = (ROOT / "docs/learning/autodrive-job-track.md").read_text()
+        for token in (
+            "12 周补强计划", "C++", "CMake", "ROS 2", "PID", "Pure Pursuit",
+            "Waymax 状态仿真", "不要求先“精通全部智能驾驶”", "不下载大数据",
+            "不启动 CARLA", "checkpoint", "失败案例", "尚未开始执行",
+        ):
+            self.assertIn(token, text)
+
+    def test_job_track_course_pack_is_complete_and_links_to_exercise(self):
+        course_root = ROOT / "docs/learning/autodrive-job-track"
+        index = (course_root / "README.md").read_text()
+        self.assertIn("01", index)
+        self.assertIn("12", index)
+        for week in range(1, 13):
+            path = course_root / f"week-{week:02d}.md"
+            self.assertTrue(path.is_file(), path)
+            text = path.read_text()
+            self.assertIn("NOT_STARTED", text, path)
+            self.assertIn("NOT_RUN", text, path)
+            self.assertIn("验收", text, path)
+        for path in (
+            course_root / "TEMPLATE.md",
+            ROOT / "projects/job-track/cpp-basics/CMakeLists.txt",
+            ROOT / "projects/job-track/cpp-basics/README.md",
+            ROOT / "projects/job-track/cpp-basics/include/vehicle_state.hpp",
+            ROOT / "projects/job-track/cpp-basics/src/vehicle_state.cpp",
+            ROOT / "projects/job-track/cpp-basics/src/main.cpp",
+            ROOT / "projects/job-track/cpp-basics/tests/state_test.cpp",
+        ):
+            self.assertTrue(path.is_file(), path)
 
     def test_first_output_guide_explains_checks_without_promoting_them(self):
         text = (ROOT / "docs/waymax-reading-first-output.md").read_text()

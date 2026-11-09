@@ -5,10 +5,12 @@
 每天建议 45–90 分钟，只推进已满足前置验证的内容。
 
 **这是后续学习安排，不是 30 天已经完成的记录。** 工程准备已完成，
-Day 01 已开始学习但尚未验收；Day 02 只有备好的课单，尚未开始。
+Day 01、Day 03、Day 04 和 Day 05 已开始讨论但尚未验收；
+Day 02 只有备好的课单，尚未收到学习者验收记录。
 日程与实际完成状态分开维护：
 
 - [每日进度与日志入口](learning/waymax-30-days/README.md)
+- [就业补强教程：从 Waymax 到初级岗位](learning/autodrive-job-track.md)
 - [每日记录模板](learning/waymax-30-days/TEMPLATE.md)
 - [准备阶段实测](learning/waymax-30-days/preparation-20261107.md)
 - [已有操作手册](waymax-learning-lab.md)
@@ -98,6 +100,18 @@ LAB_RUN=/home/my/workspace/autodrive/my-ad/artifacts/waymax/learning-某次实�
 Day 02 的只读操作步骤已备好：
 [解释器、安装登记与实际源码](learning/waymax-30-days/day-02.md)。
 不用重跑实验或新增结果目录，也不表示该学习日已经完成。
+Day 03 的实际样本讲解见
+[TFRecord、场景、对象槽位与时间帧](learning/waymax-30-days/day-03.md)，
+复用已有结果和本地文件，只读不训练。
+Day 04 的时间轴与首尾 CSV 读法见
+[reset 放好起点，step 推进状态](learning/waymax-30-days/day-04.md)。
+当前先复用已有 baseline；亲自重跑的操作仍待执行，不新增目录充作学习验收。
+Day 05 的动作单位、逆动力学与归一化说明见
+[动作是什么，单位怎么读](learning/waymax-30-days/day-05.md)。
+本课先只读已有 CSV 和源码，不新增运行目录。
+Day 06–30 的逐日课单已经建立在
+`docs/learning/waymax-30-days/day-06.md` 至 `day-30.md`；
+它们是可学习的教程，不代表这些天已经执行或验收通过。
 
 **G1 周门槛**：能不看说明讲清“数据 → reset → action → step → metric”，
 并指出 expert 的答案来源。未满足就复习，不进入调参。

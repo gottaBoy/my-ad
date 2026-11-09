@@ -62,7 +62,8 @@ replay:
 viz:
 	$(DGX_COMPOSE) --profile viz up -d foxglove-bridge
 
-.PHONY: waymax-check waymax-baseline waymax-learning waymax-evaluate waymax-verify test-waymax
+.PHONY: waymax-check waymax-baseline waymax-learning waymax-evaluate waymax-verify test-waymax \
+	job-track-cpp-check
 waymax-check:
 	bash scripts/waymax/run-cpu.sh --stage inventory
 
@@ -83,6 +84,13 @@ waymax-verify:
 test-waymax:
 	python3 -m unittest discover -s tests -p 'test_waymax_*.py' -v
 	bash -n scripts/waymax/run-cpu.sh
+
+job-track-cpp-check:
+	cmake -S projects/job-track/cpp-basics \
+		-B /tmp/my-ad-job-track-cpp-build -DCMAKE_BUILD_TYPE=Debug
+	cmake --build /tmp/my-ad-job-track-cpp-build
+	ctest --test-dir /tmp/my-ad-job-track-cpp-build --output-on-failure
+	/tmp/my-ad-job-track-cpp-build/vehicle_state_demo
 
 carla-config:
 	$(CARLA_COMPOSE) --profile '*' config --quiet
